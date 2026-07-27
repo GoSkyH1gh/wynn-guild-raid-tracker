@@ -4,7 +4,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
@@ -59,7 +59,7 @@ from .schemas import (
 )
 from .tracker import _aggregate_pending, process_payout, snapshot_guild
 
-load_dotenv()
+load_dotenv(find_dotenv())
 
 logger = logging.getLogger(__name__)
 

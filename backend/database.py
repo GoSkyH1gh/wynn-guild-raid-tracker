@@ -3,13 +3,13 @@
 import os
 from collections.abc import AsyncGenerator
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
-load_dotenv()
+load_dotenv(find_dotenv())
 
 
 def _async_database_url(database_url: str) -> str:

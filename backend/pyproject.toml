@@ -2,7 +2,7 @@
 name = "wynn-guild-raids-tracker"
 version = "0.1.0"
 description = "Add your description here"
-readme = "README.md"
+readme = "../README.md"
 requires-python = ">=3.10"
 dependencies = [
     "dotenv>=0.9.9",
