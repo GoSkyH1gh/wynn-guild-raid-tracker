@@ -176,6 +176,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         os.environ.get("FRONTEND_URL", ""),
+        "https://guild-raid-tracker.netlify.app/",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -200,7 +201,9 @@ async def database_health():
 @app.post("/api/auth/setup", response_model=DiscordUserOut)
 async def auth_setup(body: SetupRequest):
     if not SETUP_SECRET:
-        raise HTTPException(status_code=500, detail="SETUP_SECRET not configured on server")
+        raise HTTPException(
+            status_code=500, detail="SETUP_SECRET not configured on server"
+        )
     if body.secret != SETUP_SECRET:
         raise HTTPException(status_code=403, detail="Invalid setup secret")
 
@@ -233,20 +236,30 @@ async def auth_discord_callback(code: str, state: str | None = None):
         raise HTTPException(status_code=400, detail="Missing authorization code")
 
     if state is None or not consume_oauth_state(state):
-        raise HTTPException(status_code=403, detail="Invalid OAuth state — possible CSRF")
+        raise HTTPException(
+            status_code=403, detail="Invalid OAuth state — possible CSRF"
+        )
 
     token_data = await exchange_code(code)
     if token_data is None or "access_token" not in token_data:
-        raise HTTPException(status_code=502, detail="Failed to exchange code with Discord")
+        raise HTTPException(
+            status_code=502, detail="Failed to exchange code with Discord"
+        )
 
     discord_user = await get_discord_user(token_data["access_token"])
     if discord_user is None:
         raise HTTPException(status_code=502, detail="Failed to fetch Discord user")
 
     discord_id = discord_user["id"]
-    username = discord_user.get("global_name") or discord_user.get("username", "unknown")
+    username = discord_user.get("global_name") or discord_user.get(
+        "username", "unknown"
+    )
     avatar_hash = discord_user.get("avatar")
-    avatar_url = f"https://cdn.discordapp.com/avatars/{discord_id}/{avatar_hash}.png" if avatar_hash else None
+    avatar_url = (
+        f"https://cdn.discordapp.com/avatars/{discord_id}/{avatar_hash}.png"
+        if avatar_hash
+        else None
+    )
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -299,7 +312,9 @@ async def auth_list_users(admin_user: dict = Depends(get_admin_user)):
 
 
 @app.post("/api/auth/users", response_model=DiscordUserOut)
-async def auth_add_user(body: DiscordUserCreate, admin_user: dict = Depends(get_admin_user)):
+async def auth_add_user(
+    body: DiscordUserCreate, admin_user: dict = Depends(get_admin_user)
+):
     async with AsyncSessionLocal() as session:
         existing = await session.execute(
             select(DiscordUser).where(DiscordUser.discord_id == body.discord_id)
@@ -338,7 +353,9 @@ async def trigger_fetch(current_user: dict = Depends(get_current_user)):
     token = os.getenv("WYNN_TOKEN")
     guild_uuid = os.getenv("GUILD_UUID")
     if not token or not guild_uuid:
-        raise HTTPException(status_code=500, detail="WYNN_TOKEN or GUILD_UUID not configured")
+        raise HTTPException(
+            status_code=500, detail="WYNN_TOKEN or GUILD_UUID not configured"
+        )
 
     log_id = await _create_fetch_log()
     try:
@@ -366,7 +383,9 @@ async def trigger_fetch(current_user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/members", response_model=list[GuildMemberOut])
-async def list_members(current_only: bool = True, current_user: dict = Depends(get_current_user)):
+async def list_members(
+    current_only: bool = True, current_user: dict = Depends(get_current_user)
+):
     async with AsyncSessionLocal() as session:
         stmt = select(GuildMember).order_by(GuildMember.rank, GuildMember.username)
         if current_only:
@@ -391,12 +410,19 @@ async def get_member_history(uuid: str, current_user: dict = Depends(get_current
 
         return MemberHistoryOut(
             member=GuildMemberOut.model_validate(member),
-            snapshots=[RaidSnapshotOut.model_validate(s) for s in snapshots.scalars().all()],
+            snapshots=[
+                RaidSnapshotOut.model_validate(s) for s in snapshots.scalars().all()
+            ],
         )
 
 
 @app.get("/api/snapshots", response_model=list[RaidSnapshotOut])
-async def list_snapshots(member_uuid: str | None = None, limit: int = 100, offset: int = 0, current_user: dict = Depends(get_current_user)):
+async def list_snapshots(
+    member_uuid: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user),
+):
     async with AsyncSessionLocal() as session:
         stmt = select(RaidSnapshot).order_by(RaidSnapshot.timestamp.desc())
         if member_uuid:
@@ -416,12 +442,18 @@ async def list_reward_definitions(current_user: dict = Depends(get_current_user)
 
 
 @app.put("/api/reward-definitions/{definition_id}", response_model=RewardDefinitionOut)
-async def update_reward_definition(definition_id: int, body: RewardDefinitionUpdate, admin_user: dict = Depends(get_admin_user)):
+async def update_reward_definition(
+    definition_id: int,
+    body: RewardDefinitionUpdate,
+    admin_user: dict = Depends(get_admin_user),
+):
     async with AsyncSessionLocal() as session:
         async with session.begin():
             rd = await session.get(RewardDefinition, definition_id)
             if rd is None:
-                raise HTTPException(status_code=404, detail="Reward definition not found")
+                raise HTTPException(
+                    status_code=404, detail="Reward definition not found"
+                )
 
             update_data = body.model_dump(exclude_unset=True)
             for field, value in update_data.items():
@@ -533,7 +565,9 @@ async def get_member_payouts(uuid: str, current_user: dict = Depends(get_current
                     "rewarded_at": item.rewarded_at,
                     "items": [],
                 }
-            by_event[item.payout_event_id]["items"].append(PayoutItemOut.model_validate(item))
+            by_event[item.payout_event_id]["items"].append(
+                PayoutItemOut.model_validate(item)
+            )
 
         return [MemberPayoutSummary(**v) for v in by_event.values()]
 
