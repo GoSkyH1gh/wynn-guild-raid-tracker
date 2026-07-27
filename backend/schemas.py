@@ -135,6 +135,30 @@ class MemberPayoutSummary(BaseModel):
     items: list[PayoutItemOut]
 
 
+class DiscordUserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    discord_id: str
+    username: str
+    avatar_url: str | None
+    is_admin: bool
+    created_at: datetime
+    last_login: datetime
+
+
+class DiscordUserCreate(BaseModel):
+    discord_id: str
+    username: str
+    is_admin: bool = False
+
+
+class CurrentUserOut(BaseModel):
+    discord_id: str
+    username: str
+    avatar_url: str | None
+    is_admin: bool
+
+
 class FetchLogEntryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

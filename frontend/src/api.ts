@@ -65,16 +65,61 @@ export const RAID_LABELS: Record<string, string> = {
 
 const BASE = "";
 
+function getToken(): string | null {
+  return localStorage.getItem("token");
+}
+
+export function setToken(token: string) {
+  localStorage.setItem("token", token);
+}
+
+export function clearToken() {
+  localStorage.removeItem("token");
+}
+
+export function isAuthenticated(): boolean {
+  return !!getToken();
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${BASE}${url}`, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...init,
   });
+
+  if (res.status === 401) {
+    clearToken();
+    window.location.reload();
+    throw new Error("Not authenticated");
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
   }
   return res.json();
+}
+
+export async function fetchDiscordLoginUrl(): Promise<string> {
+  const data = await fetchJson<{ url: string }>("/api/auth/discord/login");
+  return data.url;
+}
+
+export interface CurrentUser {
+  discord_id: string;
+  username: string;
+  avatar_url: string | null;
+  is_admin: boolean;
+}
+
+export async function fetchCurrentUser(): Promise<CurrentUser> {
+  return fetchJson<CurrentUser>("/api/auth/me");
 }
 
 export async function fetchMembers(): Promise<GuildMember[]> {

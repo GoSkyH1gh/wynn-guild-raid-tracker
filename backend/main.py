@@ -5,13 +5,23 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 
+from .auth import (
+    create_jwt,
+    discord_login_url,
+    exchange_code,
+    get_discord_user,
+    get_current_user,
+    get_admin_user,
+)
 from .database import AsyncSessionLocal, engine, verify_database_connection
 from .models import (
     Base,
+    DiscordUser,
     FetchLog,
     GuildMember,
     RaidSnapshot,
@@ -21,6 +31,9 @@ from .models import (
     PayoutItem,
 )
 from .schemas import (
+    CurrentUserOut,
+    DiscordUserOut,
+    DiscordUserCreate,
     FetchLogEntryOut,
     GuildMemberOut,
     MemberHistoryOut,
@@ -154,8 +167,112 @@ async def database_health():
     return {"database": "connected"}
 
 
+# ── Auth routes ────────────────────────────────────────────────
+
+
+@app.get("/api/auth/discord/login")
+async def auth_discord_login():
+    return {"url": discord_login_url()}
+
+
+@app.get("/api/auth/discord/callback")
+async def auth_discord_callback(code: str):
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    token_data = await exchange_code(code)
+    if token_data is None or "access_token" not in token_data:
+        raise HTTPException(status_code=502, detail="Failed to exchange code with Discord")
+
+    discord_user = await get_discord_user(token_data["access_token"])
+    if discord_user is None:
+        raise HTTPException(status_code=502, detail="Failed to fetch Discord user")
+
+    discord_id = discord_user["id"]
+    username = discord_user.get("global_name") or discord_user.get("username", "unknown")
+    avatar_hash = discord_user.get("avatar")
+    avatar_url = f"https://cdn.discordapp.com/avatars/{discord_id}/{avatar_hash}.png" if avatar_hash else None
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(DiscordUser).where(DiscordUser.discord_id == discord_id)
+        )
+        user = result.scalar_one_or_none()
+
+        if user is None:
+            # First user becomes admin automatically
+            is_admin = True
+            user = DiscordUser(
+                discord_id=discord_id,
+                username=username,
+                avatar_url=avatar_url,
+                is_admin=is_admin,
+            )
+            session.add(user)
+        else:
+            user.username = username
+            user.avatar_url = avatar_url
+            user.last_login = datetime.now(timezone.utc)
+
+        await session.commit()
+
+    jwt_token = create_jwt(discord_id)
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    redirect_url = f"{frontend_url}?token={jwt_token}"
+    return RedirectResponse(url=redirect_url, status_code=303)
+
+
+@app.get("/api/auth/me", response_model=CurrentUserOut)
+async def auth_me(current_user: dict = Depends(get_current_user)):
+    return CurrentUserOut(**current_user)
+
+
+@app.get("/api/auth/users", response_model=list[DiscordUserOut])
+async def auth_list_users(admin_user: dict = Depends(get_admin_user)):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(DiscordUser).order_by(DiscordUser.created_at.desc())
+        )
+        return [DiscordUserOut.model_validate(u) for u in result.scalars().all()]
+
+
+@app.post("/api/auth/users", response_model=DiscordUserOut)
+async def auth_add_user(body: DiscordUserCreate, admin_user: dict = Depends(get_admin_user)):
+    async with AsyncSessionLocal() as session:
+        existing = await session.execute(
+            select(DiscordUser).where(DiscordUser.discord_id == body.discord_id)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="User already exists")
+
+        user = DiscordUser(
+            discord_id=body.discord_id,
+            username=body.username,
+            is_admin=body.is_admin,
+        )
+        session.add(user)
+        await session.commit()
+        return DiscordUserOut.model_validate(user)
+
+
+@app.delete("/api/auth/users/{discord_id}", status_code=204)
+async def auth_remove_user(discord_id: str, admin_user: dict = Depends(get_admin_user)):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(DiscordUser).where(DiscordUser.discord_id == discord_id)
+        )
+        user = result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        await session.delete(user)
+        await session.commit()
+
+
+# ── Protected API routes ────────────────────────────────────────
+
+
 @app.post("/api/trigger-fetch", response_model=TriggerResult)
-async def trigger_fetch():
+async def trigger_fetch(current_user: dict = Depends(get_current_user)):
     token = os.getenv("WYNN_TOKEN")
     guild_uuid = os.getenv("GUILD_UUID")
     if not token or not guild_uuid:
@@ -175,7 +292,7 @@ async def trigger_fetch():
 
 
 @app.get("/api/members", response_model=list[GuildMemberOut])
-async def list_members(current_only: bool = True):
+async def list_members(current_only: bool = True, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         stmt = select(GuildMember).order_by(GuildMember.rank, GuildMember.username)
         if current_only:
@@ -186,7 +303,7 @@ async def list_members(current_only: bool = True):
 
 
 @app.get("/api/members/{uuid}", response_model=MemberHistoryOut)
-async def get_member_history(uuid: str):
+async def get_member_history(uuid: str, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         member = await session.get(GuildMember, uuid)
         if member is None:
@@ -205,7 +322,7 @@ async def get_member_history(uuid: str):
 
 
 @app.get("/api/snapshots", response_model=list[RaidSnapshotOut])
-async def list_snapshots(member_uuid: str | None = None, limit: int = 100, offset: int = 0):
+async def list_snapshots(member_uuid: str | None = None, limit: int = 100, offset: int = 0, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         stmt = select(RaidSnapshot).order_by(RaidSnapshot.timestamp.desc())
         if member_uuid:
@@ -216,7 +333,7 @@ async def list_snapshots(member_uuid: str | None = None, limit: int = 100, offse
 
 
 @app.get("/api/reward-definitions", response_model=list[RewardDefinitionOut])
-async def list_reward_definitions():
+async def list_reward_definitions(current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(RewardDefinition).order_by(RewardDefinition.sort_order)
@@ -225,7 +342,7 @@ async def list_reward_definitions():
 
 
 @app.put("/api/reward-definitions/{definition_id}", response_model=RewardDefinitionOut)
-async def update_reward_definition(definition_id: int, body: RewardDefinitionUpdate):
+async def update_reward_definition(definition_id: int, body: RewardDefinitionUpdate, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         async with session.begin():
             rd = await session.get(RewardDefinition, definition_id)
@@ -245,13 +362,14 @@ async def get_pending_rewards(
     from_: datetime = Query(alias="from"),
     to: datetime = Query(alias="to"),
     member_uuid: str | None = None,
+    current_user: dict = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as session:
         return await _aggregate_pending(session, from_, to, member_uuid)
 
 
 @app.post("/api/rewards/payout", response_model=PayoutResult)
-async def create_payout(body: PayoutCreate):
+async def create_payout(body: PayoutCreate, current_user: dict = Depends(get_current_user)):
     if not body.items:
         raise HTTPException(status_code=400, detail="Payout items list is empty")
 
@@ -271,7 +389,7 @@ async def create_payout(body: PayoutCreate):
 
 
 @app.get("/api/payouts", response_model=list[PayoutEventOut])
-async def list_payouts():
+async def list_payouts(current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(PayoutEvent).order_by(PayoutEvent.created_at.desc())
@@ -290,7 +408,7 @@ async def list_payouts():
 
 
 @app.get("/api/payouts/{payout_id}", response_model=PayoutEventOut)
-async def get_payout(payout_id: int):
+async def get_payout(payout_id: int, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         event = await session.get(PayoutEvent, payout_id)
         if event is None:
@@ -304,7 +422,7 @@ async def get_payout(payout_id: int):
 
 
 @app.get("/api/members/{uuid}/payouts", response_model=list[MemberPayoutSummary])
-async def get_member_payouts(uuid: str):
+async def get_member_payouts(uuid: str, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         member = await session.get(GuildMember, uuid)
         if member is None:
@@ -333,7 +451,7 @@ async def get_member_payouts(uuid: str):
 
 
 @app.get("/api/status", response_model=ServerStatus)
-async def get_status():
+async def get_status(current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(FetchLog).order_by(FetchLog.started_at.desc())

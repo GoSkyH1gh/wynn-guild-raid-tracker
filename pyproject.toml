@@ -11,4 +11,5 @@ dependencies = [
     "asyncpg>=0.30.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.28.0",
+    "pyjwt>=2.8.0",
 ]

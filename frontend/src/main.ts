@@ -3,9 +3,15 @@ import {
   fetchPayouts,
   fetchServerStatus,
   createPayout,
+  fetchDiscordLoginUrl,
+  fetchCurrentUser,
+  setToken,
+  clearToken,
+  isAuthenticated,
   type PendingRewardItem,
   type PayoutEvent,
   type ServerStatus,
+  type CurrentUser,
   RAID_RUNES,
 } from "./api.js";
 
@@ -20,6 +26,15 @@ const VIEW_LABELS: Record<View, string> = {
 };
 
 const params = new URLSearchParams(location.search);
+
+const tokenParam = params.get("token");
+if (tokenParam) {
+  setToken(tokenParam);
+  const url = new URL(location.href);
+  url.searchParams.delete("token");
+  history.replaceState(null, "", url.href);
+}
+
 let currentView: View = (params.get("view") as View) ?? "pending";
 let currentRange: Range = (params.get("range") as Range) ?? "7d";
 let pendingData: PendingRewardItem[] = [];
@@ -27,6 +42,7 @@ let payoutsData: PayoutEvent[] = [];
 let statusData: ServerStatus | null = null;
 let selected: Set<string> = new Set();
 let animateRows = true;
+let currentUser: CurrentUser | null = null;
 
 function now(): Date {
   return new Date();
@@ -114,13 +130,30 @@ function runeTag(rune: string, color: string) {
 }
 
 function render() {
-  const { from, to } = rangeFrom(currentRange);
+  if (!isAuthenticated()) {
+    renderLogin();
+    return;
+  }
 
+  const { from, to } = rangeFrom(currentRange);
   const showRange = currentView !== "status";
+
+  const userHtml = currentUser
+    ? `<div class="user-info">
+        ${currentUser.avatar_url
+          ? `<img class="user-avatar" src="${currentUser.avatar_url}" alt="" width="24" height="24">`
+          : `<span class="user-avatar-fallback">${currentUser.username[0]?.toUpperCase() ?? "?"}</span>`}
+        <span class="user-name">${currentUser.username}</span>
+        <button class="btn-logout" id="logout-btn">Log out</button>
+      </div>`
+    : "";
 
   $app.innerHTML = `
     <header class="header">
-      <h1 class="title">Guild Raid&nbsp;Tracker</h1>
+      <div class="header-row">
+        <h1 class="title">Guild Raid&nbsp;Tracker</h1>
+        ${userHtml}
+      </div>
       <p class="subtitle">Track completions &amp; payout runes</p>
     </header>
 
@@ -135,6 +168,11 @@ function render() {
 
     <div id="status-bar" class="status-bar"></div>
   `;
+
+  document.getElementById("logout-btn")?.addEventListener("click", () => {
+    clearToken();
+    window.location.reload();
+  });
 
   document.querySelectorAll(".view-btn").forEach((btn) =>
     btn.addEventListener("click", () => {
@@ -172,6 +210,27 @@ function render() {
   } else {
     renderStatus($contentEl, $statusBarEl);
   }
+}
+
+function renderLogin() {
+  $app.innerHTML = `
+    <div class="login-screen">
+      <div class="login-card">
+        <h1 class="login-title">Guild Raid&nbsp;Tracker</h1>
+        <p class="login-desc">Sign in with Discord to continue</p>
+        <button class="btn-discord" id="login-btn">Login with Discord</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("login-btn")?.addEventListener("click", async () => {
+    try {
+      const url = await fetchDiscordLoginUrl();
+      window.location.href = url;
+    } catch (err) {
+      showToast(`Login failed: ${err instanceof Error ? err.message : "error"}`);
+    }
+  });
 }
 
 // ── Pending view ───────────────────────────────────────────────
@@ -493,6 +552,11 @@ function showToast(msg: string) {
 // ── Data fetching ──────────────────────────────────────────────
 
 async function fetchData() {
+  if (!isAuthenticated()) {
+    render();
+    return;
+  }
+
   const { from, to } = rangeFrom(currentRange);
 
   try {
@@ -510,7 +574,19 @@ async function fetchData() {
 
 // ── Init ───────────────────────────────────────────────────────
 
-render();
-fetchData();
+async function init() {
+  if (isAuthenticated()) {
+    try {
+      currentUser = await fetchCurrentUser();
+    } catch {
+      clearToken();
+    }
+  }
+  render();
+  if (isAuthenticated()) {
+    fetchData();
+    setInterval(fetchData, 60000);
+  }
+}
 
-setInterval(fetchData, 60000);
+init();

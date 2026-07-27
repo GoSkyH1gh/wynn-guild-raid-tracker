@@ -87,6 +87,18 @@ class PayoutEvent(Base):
     items: Mapped[list["PayoutItem"]] = relationship(back_populates="event", cascade="all, delete-orphan")
 
 
+class DiscordUser(Base):
+    __tablename__ = "discord_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    discord_id: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
+    avatar_url: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_login: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
 class FetchLog(Base):
     __tablename__ = "fetch_logs"
 
