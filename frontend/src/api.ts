@@ -65,7 +65,7 @@ export const RAID_LABELS: Record<string, string> = {
   wtp: "The Wartorn Palace",
 };
 
-const BASE = "";
+const BASE = import.meta.env.VITE_API_BASE ?? "";
 
 let _token: string | null = null;
 
