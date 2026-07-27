@@ -320,16 +320,28 @@ async def trigger_fetch(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="WYNN_TOKEN or GUILD_UUID not configured")
 
     log_id = await _create_fetch_log()
-    result = await snapshot_guild(token, guild_uuid, fetch_log_id=log_id)
-    if result["status"] == "error":
-        raise HTTPException(status_code=502, detail="API fetch failed")
+    try:
+        result = await snapshot_guild(token, guild_uuid, fetch_log_id=log_id)
+        if result["status"] == "error":
+            raise HTTPException(status_code=502, detail="API fetch failed")
 
-    return TriggerResult(
-        status=result["status"],
-        snapshot_count=result["snapshot_count"],
-        restricted_count=result["restricted_count"],
-        timestamp=result["timestamp"],
-    )
+        return TriggerResult(
+            status=result["status"],
+            snapshot_count=result["snapshot_count"],
+            restricted_count=result["restricted_count"],
+            timestamp=result["timestamp"],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        async with AsyncSessionLocal() as session:
+            log = await session.get(FetchLog, log_id)
+            if log:
+                log.completed_at = datetime.now(timezone.utc)
+                log.status = "error"
+                log.error_message = str(e)[:512]
+                await session.commit()
+        raise HTTPException(status_code=500, detail=str(e)[:256])
 
 
 @app.get("/api/members", response_model=list[GuildMemberOut])

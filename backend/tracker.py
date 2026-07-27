@@ -77,8 +77,6 @@ async def snapshot_guild(token: str, guild_uuid: str, fetch_log_id: int | None =
             former_members = await _handle_departed_members(session, seen_uuids, now)
             snapshot_count += former_members
 
-        await session.commit()
-
     await _update_fetch_log(fetch_log_id, "ok", now, snapshot_count, restricted_count)
 
     return {
@@ -111,6 +109,8 @@ async def _update_fetch_log(
             if error_message:
                 log.error_message = error_message
             await session.commit()
+        else:
+            logger.warning("FetchLog %s not found — cannot update status to %s", log_id, status)
 
 
 async def _upsert_member(session: AsyncSession, uuid: str, username: str, rank: str, now: datetime):
