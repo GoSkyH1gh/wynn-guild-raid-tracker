@@ -176,7 +176,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         os.environ.get("FRONTEND_URL", ""),
-        "https://guild-raid-tracker.netlify.app/",
+        "https://guild-raid-tracker.netlify.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
