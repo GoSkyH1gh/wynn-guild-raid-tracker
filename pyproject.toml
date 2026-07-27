@@ -1,0 +1,13 @@
+[project]
+name = "wynn-guild-raids-tracker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "dotenv>=0.9.9",
+    "fastapi[standard]>=0.140.0",
+    "sqlalchemy>=2.0.51",
+    "asyncpg>=0.30.0",
+    "python-dotenv>=1.0.0",
+]
