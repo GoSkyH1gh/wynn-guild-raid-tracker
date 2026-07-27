@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .auth import (
     create_jwt,
@@ -200,15 +200,23 @@ async def auth_discord_callback(code: str):
         user = result.scalar_one_or_none()
 
         if user is None:
-            # First user becomes admin automatically
-            is_admin = True
-            user = DiscordUser(
-                discord_id=discord_id,
-                username=username,
-                avatar_url=avatar_url,
-                is_admin=is_admin,
-            )
-            session.add(user)
+            user_count = await session.execute(select(func.count(DiscordUser.id)))
+            total_users = user_count.scalar()
+
+            if total_users == 0:
+                user = DiscordUser(
+                    discord_id=discord_id,
+                    username=username,
+                    avatar_url=avatar_url,
+                    is_admin=True,
+                )
+                session.add(user)
+            else:
+                frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+                return RedirectResponse(
+                    url=f"{frontend_url}?error=unauthorized",
+                    status_code=303,
+                )
         else:
             user.username = username
             user.avatar_url = avatar_url

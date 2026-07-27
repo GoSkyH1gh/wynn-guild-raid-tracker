@@ -28,10 +28,16 @@ const VIEW_LABELS: Record<View, string> = {
 const params = new URLSearchParams(location.search);
 
 const tokenParam = params.get("token");
+const errorParam = params.get("error");
 if (tokenParam) {
   setToken(tokenParam);
   const url = new URL(location.href);
   url.searchParams.delete("token");
+  history.replaceState(null, "", url.href);
+}
+if (errorParam === "unauthorized") {
+  const url = new URL(location.href);
+  url.searchParams.delete("error");
   history.replaceState(null, "", url.href);
 }
 
@@ -213,11 +219,14 @@ function render() {
 }
 
 function renderLogin() {
+  const wasDenied = errorParam === "unauthorized";
+
   $app.innerHTML = `
     <div class="login-screen">
       <div class="login-card">
         <h1 class="login-title">Guild Raid&nbsp;Tracker</h1>
         <p class="login-desc">Sign in with Discord to continue</p>
+        ${wasDenied ? `<p class="login-error">Your Discord account is not authorized. Ask an admin to add you.</p>` : ""}
         <button class="btn-discord" id="login-btn">Login with Discord</button>
       </div>
     </div>

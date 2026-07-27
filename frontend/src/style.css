@@ -472,6 +472,13 @@ body {
   margin-bottom: 1.5rem;
 }
 
+.login-error {
+  color: var(--rune-tcc);
+  font-size: 0.8rem;
+  margin-bottom: 1rem;
+  line-height: 1.4;
+}
+
 .btn-discord {
   font-family: var(--font-display);
   font-weight: 600;
