@@ -8,9 +8,11 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from .auth import (
+    AUTHORIZED_DISCORD_IDS,
+    SETUP_SECRET,
     create_jwt,
     discord_login_url,
     exchange_code,
@@ -34,6 +36,7 @@ from .schemas import (
     CurrentUserOut,
     DiscordUserOut,
     DiscordUserCreate,
+    SetupRequest,
     FetchLogEntryOut,
     GuildMemberOut,
     MemberHistoryOut,
@@ -170,6 +173,30 @@ async def database_health():
 # ── Auth routes ────────────────────────────────────────────────
 
 
+@app.post("/api/auth/setup", response_model=DiscordUserOut)
+async def auth_setup(body: SetupRequest):
+    if not SETUP_SECRET:
+        raise HTTPException(status_code=500, detail="SETUP_SECRET not configured on server")
+    if body.secret != SETUP_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid setup secret")
+
+    async with AsyncSessionLocal() as session:
+        existing = await session.execute(
+            select(DiscordUser).where(DiscordUser.discord_id == body.discord_id)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="User already authorized")
+
+        user = DiscordUser(
+            discord_id=body.discord_id,
+            username=body.username or body.discord_id,
+            is_admin=True,
+        )
+        session.add(user)
+        await session.commit()
+        return DiscordUserOut.model_validate(user)
+
+
 @app.get("/api/auth/discord/login")
 async def auth_discord_login():
     return {"url": discord_login_url()}
@@ -200,10 +227,7 @@ async def auth_discord_callback(code: str):
         user = result.scalar_one_or_none()
 
         if user is None:
-            user_count = await session.execute(select(func.count(DiscordUser.id)))
-            total_users = user_count.scalar()
-
-            if total_users == 0:
+            if discord_id in AUTHORIZED_DISCORD_IDS:
                 user = DiscordUser(
                     discord_id=discord_id,
                     username=username,

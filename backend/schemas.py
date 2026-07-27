@@ -152,6 +152,12 @@ class DiscordUserCreate(BaseModel):
     is_admin: bool = False
 
 
+class SetupRequest(BaseModel):
+    secret: str
+    discord_id: str
+    username: str = ""
+
+
 class CurrentUserOut(BaseModel):
     discord_id: str
     username: str

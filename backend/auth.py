@@ -30,6 +30,13 @@ DISCORD_AUTHORIZE_URL = "https://discord.com/api/oauth2/authorize"
 DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
 DISCORD_USER_URL = "https://discord.com/api/users/@me"
 
+SETUP_SECRET = os.getenv("SETUP_SECRET", "")
+
+AUTHORIZED_DISCORD_IDS: set[str] = set()
+_raw = os.getenv("AUTHORIZED_DISCORD_IDS", "")
+if _raw:
+    AUTHORIZED_DISCORD_IDS = {x.strip() for x in _raw.split(",") if x.strip()}
+
 
 def create_jwt(discord_id: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=SESSION_EXPIRE_DAYS)
