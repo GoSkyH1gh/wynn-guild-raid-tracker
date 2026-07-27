@@ -25,14 +25,14 @@ const VIEW_LABELS: Record<View, string> = {
   status: "Status",
 };
 
+const hashParams = new URLSearchParams(location.hash.slice(1));
+const tokenParam = hashParams.get("token");
 const params = new URLSearchParams(location.search);
-
-const tokenParam = params.get("token");
 const errorParam = params.get("error");
 if (tokenParam) {
   setToken(tokenParam);
   const url = new URL(location.href);
-  url.searchParams.delete("token");
+  url.hash = "";
   history.replaceState(null, "", url.href);
 }
 if (errorParam === "unauthorized") {
@@ -136,7 +136,7 @@ function runeTag(rune: string, color: string) {
 }
 
 function render() {
-  if (!isAuthenticated()) {
+  if (!isAuthenticated() && !currentUser) {
     renderLogin();
     return;
   }
@@ -561,7 +561,7 @@ function showToast(msg: string) {
 // ── Data fetching ──────────────────────────────────────────────
 
 async function fetchData() {
-  if (!isAuthenticated()) {
+  if (!isAuthenticated() && !currentUser) {
     render();
     return;
   }
@@ -575,6 +575,9 @@ async function fetchData() {
     payoutsData = await fetchPayouts();
     statusData = await fetchServerStatus();
   } catch (err) {
+    if (!isAuthenticated()) {
+      currentUser = null;
+    }
     showToast(`Failed to load data: ${err instanceof Error ? err.message : "error"}`);
   }
 
@@ -591,10 +594,21 @@ async function init() {
       clearToken();
     }
   }
-  render();
-  if (isAuthenticated()) {
+
+  if (!currentUser && !isAuthenticated()) {
+    try {
+      currentUser = await fetchCurrentUser();
+    } catch {
+      currentUser = null;
+    }
+  }
+
+  if (currentUser || isAuthenticated()) {
+    render();
     fetchData();
     setInterval(fetchData, 60000);
+  } else {
+    render();
   }
 }
 

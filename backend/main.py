@@ -19,6 +19,9 @@ from .auth import (
     get_discord_user,
     get_current_user,
     get_admin_user,
+    create_oauth_state,
+    consume_oauth_state,
+    set_jwt_cookie,
 )
 from .database import AsyncSessionLocal, engine, verify_database_connection
 from .models import (
@@ -199,13 +202,17 @@ async def auth_setup(body: SetupRequest):
 
 @app.get("/api/auth/discord/login")
 async def auth_discord_login():
-    return {"url": discord_login_url()}
+    state = create_oauth_state()
+    return {"url": discord_login_url(state=state)}
 
 
 @app.get("/api/auth/discord/callback")
-async def auth_discord_callback(code: str):
+async def auth_discord_callback(code: str, state: str | None = None):
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
+
+    if state is None or not consume_oauth_state(state):
+        raise HTTPException(status_code=403, detail="Invalid OAuth state — possible CSRF")
 
     token_data = await exchange_code(code)
     if token_data is None or "access_token" not in token_data:
@@ -250,8 +257,10 @@ async def auth_discord_callback(code: str):
 
     jwt_token = create_jwt(discord_id)
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    redirect_url = f"{frontend_url}?token={jwt_token}"
-    return RedirectResponse(url=redirect_url, status_code=303)
+    redirect_url = f"{frontend_url.rstrip('/')}/#token={jwt_token}"
+    response = RedirectResponse(url=redirect_url, status_code=303)
+    set_jwt_cookie(response, jwt_token)
+    return response
 
 
 @app.get("/api/auth/me", response_model=CurrentUserOut)
@@ -374,7 +383,7 @@ async def list_reward_definitions(current_user: dict = Depends(get_current_user)
 
 
 @app.put("/api/reward-definitions/{definition_id}", response_model=RewardDefinitionOut)
-async def update_reward_definition(definition_id: int, body: RewardDefinitionUpdate, current_user: dict = Depends(get_current_user)):
+async def update_reward_definition(definition_id: int, body: RewardDefinitionUpdate, admin_user: dict = Depends(get_admin_user)):
     async with AsyncSessionLocal() as session:
         async with session.begin():
             rd = await session.get(RewardDefinition, definition_id)
@@ -401,7 +410,7 @@ async def get_pending_rewards(
 
 
 @app.post("/api/rewards/payout", response_model=PayoutResult)
-async def create_payout(body: PayoutCreate, current_user: dict = Depends(get_current_user)):
+async def create_payout(body: PayoutCreate, admin_user: dict = Depends(get_admin_user)):
     if not body.items:
         raise HTTPException(status_code=400, detail="Payout items list is empty")
 

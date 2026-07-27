@@ -65,16 +65,18 @@ export const RAID_LABELS: Record<string, string> = {
 
 const BASE = "";
 
+let _token: string | null = null;
+
 function getToken(): string | null {
-  return localStorage.getItem("token");
+  return _token;
 }
 
 export function setToken(token: string) {
-  localStorage.setItem("token", token);
+  _token = token;
 }
 
 export function clearToken() {
-  localStorage.removeItem("token");
+  _token = null;
 }
 
 export function isAuthenticated(): boolean {
@@ -95,7 +97,6 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
   if (res.status === 401) {
     clearToken();
-    window.location.reload();
     throw new Error("Not authenticated");
   }
 
