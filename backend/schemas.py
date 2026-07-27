@@ -98,7 +98,15 @@ class PayoutEventOut(BaseModel):
     starts_at: datetime
     ends_at: datetime
     created_at: datetime
+    status: str = "completed"
+    voided_at: datetime | None = None
     items: list[PayoutItemOut] = []
+
+
+class VoidPayoutResult(BaseModel):
+    payout_event_id: int
+    status: str
+    voided_at: datetime
 
 
 class PayoutCreateItem(BaseModel):

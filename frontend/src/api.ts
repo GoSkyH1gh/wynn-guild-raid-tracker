@@ -33,6 +33,8 @@ export interface PayoutEvent {
   starts_at: string;
   ends_at: string;
   created_at: string;
+  status: string;
+  voided_at: string | null;
   items: PayoutItem[];
 }
 
@@ -150,6 +152,12 @@ export async function createPayout(body: {
   return fetchJson("/api/rewards/payout", {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+export async function voidPayout(payoutId: number): Promise<{ payout_event_id: number; status: string; voided_at: string }> {
+  return fetchJson(`/api/payouts/${payoutId}/void`, {
+    method: "POST",
   });
 }
 

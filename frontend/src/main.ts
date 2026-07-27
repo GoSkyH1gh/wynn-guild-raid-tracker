@@ -3,6 +3,7 @@ import {
   fetchPayouts,
   fetchServerStatus,
   createPayout,
+  voidPayout,
   fetchDiscordLoginUrl,
   fetchCurrentUser,
   setToken,
@@ -382,6 +383,7 @@ function renderHistory($el: HTMLElement, $status: HTMLElement) {
           return `<th>${info.rune}</th>`;
         }).join("")}
         <th>Total</th>
+        <th>Status</th>
       </tr>
     </thead>
     <tbody>
@@ -398,7 +400,14 @@ function renderHistory($el: HTMLElement, $status: HTMLElement) {
     }
 
     for (const [uuid, entry] of byMember) {
-      html += `<tr>
+      const isVoided = payout.status === "voided";
+      const statusHtml = isVoided
+        ? `<span class="tag-voided">Voided</span>`
+        : currentUser?.is_admin
+          ? `<button class="btn-void" data-payout-id="${payout.id}">Void</button>`
+          : `<span class="text-completed">Completed</span>`;
+
+      html += `<tr${isVoided ? ' class="row-voided"' : ""}>
         <td>${fmtDate(payout.created_at)}</td>
         <td>${payout.label ?? "—"}</td>
         <td>${entry.username.slice(0, 8)}…</td>
@@ -407,12 +416,20 @@ function renderHistory($el: HTMLElement, $status: HTMLElement) {
           return `<td>${c > 0 ? c : "—"}</td>`;
         }).join("")}
         <td><span class="total-runes">${totalRunes(entry.raids)}</span></td>
+        <td>${statusHtml}</td>
       </tr>`;
     }
   }
 
   html += `</tbody></table></div>`;
   $el.innerHTML = html;
+
+  document.querySelectorAll(".btn-void").forEach((btn) =>
+    btn.addEventListener("click", (e) => {
+      const payoutId = Number((e.currentTarget as HTMLElement).dataset.payoutId);
+      handleVoid(payoutId);
+    })
+  );
 }
 
 // ── Status view ────────────────────────────────────────────────
@@ -536,6 +553,22 @@ async function handlePayout() {
       $payoutBtn.disabled = false;
       $payoutBtn.textContent = "Pay out selected";
     }
+  }
+}
+
+// ── Void action ────────────────────────────────────────────────
+
+async function handleVoid(payoutId: number) {
+  if (!confirm("Void this payout? This will re-open the completions for future payouts.")) {
+    return;
+  }
+
+  try {
+    await voidPayout(payoutId);
+    await fetchData();
+    showToast("Payout voided");
+  } catch (err) {
+    showToast(`Failed to void payout: ${err instanceof Error ? err.message : "Unknown error"}`);
   }
 }
 

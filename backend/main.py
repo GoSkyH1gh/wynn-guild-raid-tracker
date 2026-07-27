@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import select, text as sa_text
+from sqlalchemy.orm import selectinload
 
 from .auth import (
     AUTHORIZED_DISCORD_IDS,
@@ -51,6 +52,7 @@ from .schemas import (
     PayoutItemOut,
     PayoutCreate,
     PayoutResult,
+    VoidPayoutResult,
     ServerStatus,
     TriggerResult,
     MemberPayoutSummary,
@@ -133,6 +135,21 @@ async def lifespan(app: FastAPI):
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            sa_text(
+                "ALTER TABLE payout_events "
+                "ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'completed'"
+            )
+        )
+        await session.execute(
+            sa_text(
+                "ALTER TABLE payout_events "
+                "ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ"
+            )
+        )
+        await session.commit()
 
     await _seed_reward_definitions()
 
@@ -426,7 +443,7 @@ async def create_payout(body: PayoutCreate, admin_user: dict = Depends(get_admin
     if not body.items:
         raise HTTPException(status_code=400, detail="Payout items list is empty")
 
-    payout_event = await process_payout(
+    payout_event_id, payout_label, item_count, created_at = await process_payout(
         starts_at=body.starts_at,
         ends_at=body.ends_at,
         items=[item.model_dump() for item in body.items],
@@ -434,10 +451,10 @@ async def create_payout(body: PayoutCreate, admin_user: dict = Depends(get_admin
     )
 
     return PayoutResult(
-        payout_event_id=payout_event.id,
-        label=payout_event.label,
-        item_count=len(payout_event.items),
-        created_at=payout_event.created_at,
+        payout_event_id=payout_event_id,
+        label=payout_label,
+        item_count=item_count,
+        created_at=created_at,
     )
 
 
@@ -445,33 +462,47 @@ async def create_payout(body: PayoutCreate, admin_user: dict = Depends(get_admin
 async def list_payouts(current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(PayoutEvent).order_by(PayoutEvent.created_at.desc())
+            select(PayoutEvent)
+            .options(selectinload(PayoutEvent.items))
+            .order_by(PayoutEvent.created_at.desc())
         )
         events = result.scalars().all()
 
-        output = []
-        for event in events:
-            items_result = await session.execute(
-                select(PayoutItem).where(PayoutItem.payout_event_id == event.id)
-            )
-            event.items = items_result.scalars().all()
-            output.append(PayoutEventOut.model_validate(event))
-
-        return output
+        return [PayoutEventOut.model_validate(event) for event in events]
 
 
 @app.get("/api/payouts/{payout_id}", response_model=PayoutEventOut)
 async def get_payout(payout_id: int, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
-        event = await session.get(PayoutEvent, payout_id)
+        event = await session.get(
+            PayoutEvent,
+            payout_id,
+            options=[selectinload(PayoutEvent.items)],
+        )
         if event is None:
             raise HTTPException(status_code=404, detail="Payout not found")
 
-        items_result = await session.execute(
-            select(PayoutItem).where(PayoutItem.payout_event_id == payout_id)
-        )
-        event.items = items_result.scalars().all()
         return PayoutEventOut.model_validate(event)
+
+
+@app.post("/api/payouts/{payout_id}/void", response_model=VoidPayoutResult)
+async def void_payout(payout_id: int, admin_user: dict = Depends(get_admin_user)):
+    async with AsyncSessionLocal() as session:
+        event = await session.get(PayoutEvent, payout_id)
+        if event is None:
+            raise HTTPException(status_code=404, detail="Payout not found")
+        if event.status == "voided":
+            raise HTTPException(status_code=409, detail="Payout is already voided")
+
+        event.status = "voided"
+        event.voided_at = datetime.now(timezone.utc)
+        await session.commit()
+
+        return VoidPayoutResult(
+            payout_event_id=event.id,
+            status=event.status,
+            voided_at=event.voided_at,
+        )
 
 
 @app.get("/api/members/{uuid}/payouts", response_model=list[MemberPayoutSummary])

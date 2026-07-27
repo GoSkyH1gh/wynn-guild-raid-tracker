@@ -249,6 +249,8 @@ async def _get_pending_completions(
             PayoutItem.detected_completion_id,
             func.coalesce(func.sum(PayoutItem.count_paid), 0).label("total_paid"),
         )
+        .join(PayoutEvent, PayoutItem.payout_event_id == PayoutEvent.id)
+        .where(PayoutEvent.status != "voided")
         .group_by(PayoutItem.detected_completion_id)
         .subquery()
     )
@@ -326,7 +328,9 @@ async def process_payout(
     ends_at: datetime,
     items: list[dict],
     label: str | None = None,
-) -> PayoutEvent:
+) -> tuple[int, str | None, int, datetime]:
+    item_count = 0
+
     async with AsyncSessionLocal() as session:
         async with session.begin():
             payout_event = PayoutEvent(
@@ -378,6 +382,7 @@ async def process_payout(
                         reward_amount=take * unit_amount,
                     )
                     session.add(payout_item)
+                    item_count += 1
                     still_needed -= take
 
                 if still_needed > 0:
@@ -389,7 +394,8 @@ async def process_payout(
                         member_uuid,
                     )
 
-        await session.commit()
+        payout_event_id = payout_event.id
+        payout_label = payout_event.label
+        payout_created_at = payout_event.created_at
 
-        payout_with_items = await session.get(PayoutEvent, payout_event.id)
-        return payout_with_items
+    return payout_event_id, payout_label, item_count, payout_created_at

@@ -360,6 +360,48 @@ body {
   color: var(--text-dim);
 }
 
+.row-voided td {
+  opacity: 0.5;
+}
+
+.tag-voided {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--rune-tcc) 15%, transparent);
+  color: var(--rune-tcc);
+  white-space: nowrap;
+}
+
+.text-completed {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.btn-void {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--rune-tcc);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--rune-tcc);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-void:hover {
+  background: color-mix(in srgb, var(--rune-tcc) 15%, transparent);
+}
+
+.btn-void:focus-visible {
+  outline: 2px solid var(--rune-tcc);
+  outline-offset: 2px;
+}
+
 /* ── Status page ─────────────────────────────── */
 
 .status-grid {
