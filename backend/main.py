@@ -5,22 +5,38 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from .database import AsyncSessionLocal, engine, verify_database_connection
-from .models import Base, GuildMember, RaidSnapshot, TrackingPeriod, RewardEligibility
+from .models import (
+    Base,
+    FetchLog,
+    GuildMember,
+    RaidSnapshot,
+    RewardDefinition,
+    DetectedCompletion,
+    PayoutEvent,
+    PayoutItem,
+)
 from .schemas import (
+    FetchLogEntryOut,
     GuildMemberOut,
     MemberHistoryOut,
     RaidSnapshotOut,
-    RewardEligibilityOut,
-    TrackingPeriodCreate,
-    TrackingPeriodOut,
+    RewardDefinitionOut,
+    RewardDefinitionUpdate,
+    PendingRewardItem,
+    PayoutEventOut,
+    PayoutItemOut,
+    PayoutCreate,
+    PayoutResult,
+    ServerStatus,
     TriggerResult,
+    MemberPayoutSummary,
 )
-from .tracker import calculate_period_rewards, snapshot_guild
+from .tracker import _aggregate_pending, process_payout, snapshot_guild
 
 load_dotenv()
 
@@ -29,6 +45,42 @@ logger = logging.getLogger(__name__)
 FETCH_INTERVAL_SECONDS = 60 * 30
 
 _background_task: asyncio.Task | None = None
+
+DEFAULT_RAID_TYPES = [
+    {"name": "notg", "display": "Nest of the Grootslangs"},
+    {"name": "nol", "display": "Orphion's Nexus of Light"},
+    {"name": "tcc", "display": "The Canyon Colossus"},
+    {"name": "tna", "display": "The Nameless Anomaly"},
+    {"name": "wtp", "display": "The Wartorn Palace"},
+]
+
+
+async def _seed_reward_definitions():
+    async with AsyncSessionLocal() as session:
+        for i, rt in enumerate(DEFAULT_RAID_TYPES):
+            existing = await session.execute(
+                select(RewardDefinition).where(RewardDefinition.raid_type == rt["name"])
+            )
+            if existing.scalar_one_or_none() is None:
+                session.add(
+                    RewardDefinition(
+                        raid_type=rt["name"],
+                        display_name=rt["display"],
+                        reward_amount=0,
+                        reward_label="",
+                        sort_order=i,
+                        is_active=True,
+                    )
+                )
+        await session.commit()
+
+
+async def _create_fetch_log() -> int:
+    async with AsyncSessionLocal() as session:
+        log = FetchLog(started_at=datetime.now(timezone.utc), status="running")
+        session.add(log)
+        await session.commit()
+        return log.id
 
 
 async def _periodic_fetch():
@@ -39,11 +91,19 @@ async def _periodic_fetch():
         return
 
     while True:
+        log_id = await _create_fetch_log()
         try:
-            result = await snapshot_guild(token, guild_uuid)
+            result = await snapshot_guild(token, guild_uuid, fetch_log_id=log_id)
             logger.info("Background fetch: %s", result)
-        except Exception:
+        except Exception as e:
             logger.exception("Background fetch failed")
+            async with AsyncSessionLocal() as session:
+                log = await session.get(FetchLog, log_id)
+                if log:
+                    log.completed_at = datetime.now(timezone.utc)
+                    log.status = "error"
+                    log.error_message = str(e)[:512]
+                    await session.commit()
 
         await asyncio.sleep(FETCH_INTERVAL_SECONDS)
 
@@ -54,6 +114,8 @@ async def lifespan(app: FastAPI):
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    await _seed_reward_definitions()
 
     global _background_task
     _background_task = asyncio.create_task(_periodic_fetch())
@@ -99,7 +161,8 @@ async def trigger_fetch():
     if not token or not guild_uuid:
         raise HTTPException(status_code=500, detail="WYNN_TOKEN or GUILD_UUID not configured")
 
-    result = await snapshot_guild(token, guild_uuid)
+    log_id = await _create_fetch_log()
+    result = await snapshot_guild(token, guild_uuid, fetch_log_id=log_id)
     if result["status"] == "error":
         raise HTTPException(status_code=502, detail="API fetch failed")
 
@@ -152,141 +215,157 @@ async def list_snapshots(member_uuid: str | None = None, limit: int = 100, offse
         return [RaidSnapshotOut.model_validate(s) for s in result.scalars().all()]
 
 
-@app.get("/api/periods", response_model=list[TrackingPeriodOut])
-async def list_periods():
+@app.get("/api/reward-definitions", response_model=list[RewardDefinitionOut])
+async def list_reward_definitions():
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(TrackingPeriod).order_by(TrackingPeriod.starts_at.desc())
+            select(RewardDefinition).order_by(RewardDefinition.sort_order)
         )
-        return [TrackingPeriodOut.model_validate(p) for p in result.scalars().all()]
+        return [RewardDefinitionOut.model_validate(r) for r in result.scalars().all()]
 
 
-@app.post("/api/periods", response_model=TrackingPeriodOut, status_code=201)
-async def create_period(body: TrackingPeriodCreate):
-    now = datetime.now(timezone.utc)
+@app.put("/api/reward-definitions/{definition_id}", response_model=RewardDefinitionOut)
+async def update_reward_definition(definition_id: int, body: RewardDefinitionUpdate):
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            if body.starts_at is None:
-                starts_at = now
-            else:
-                starts_at = body.starts_at
+            rd = await session.get(RewardDefinition, definition_id)
+            if rd is None:
+                raise HTTPException(status_code=404, detail="Reward definition not found")
 
-            period = TrackingPeriod(
-                name=body.name,
-                starts_at=starts_at,
-                ends_at=body.ends_at,
-                is_active=True,
-            )
-            session.add(period)
+            update_data = body.model_dump(exclude_unset=True)
+            for field, value in update_data.items():
+                setattr(rd, field, value)
 
         await session.commit()
-        return TrackingPeriodOut.model_validate(period)
+        return RewardDefinitionOut.model_validate(rd)
 
 
-@app.post("/api/periods/{period_id}/close")
-async def close_period(period_id: int):
+@app.get("/api/rewards/pending", response_model=list[PendingRewardItem])
+async def get_pending_rewards(
+    from_: datetime = Query(alias="from"),
+    to: datetime = Query(alias="to"),
+    member_uuid: str | None = None,
+):
     async with AsyncSessionLocal() as session:
-        async with session.begin():
-            period = await session.get(TrackingPeriod, period_id)
-            if period is None:
-                raise HTTPException(status_code=404, detail="Period not found")
-            period.ends_at = datetime.now(timezone.utc)
-            period.is_active = False
-        await session.commit()
-        return TrackingPeriodOut.model_validate(period)
+        return await _aggregate_pending(session, from_, to, member_uuid)
 
 
-@app.post("/api/periods/{period_id}/calculate", response_model=list[RewardEligibilityOut])
-async def calculate_rewards(period_id: int):
+@app.post("/api/rewards/payout", response_model=PayoutResult)
+async def create_payout(body: PayoutCreate):
+    if not body.items:
+        raise HTTPException(status_code=400, detail="Payout items list is empty")
+
+    payout_event = await process_payout(
+        starts_at=body.starts_at,
+        ends_at=body.ends_at,
+        items=[item.model_dump() for item in body.items],
+        label=body.label,
+    )
+
+    return PayoutResult(
+        payout_event_id=payout_event.id,
+        label=payout_event.label,
+        item_count=len(payout_event.items),
+        created_at=payout_event.created_at,
+    )
+
+
+@app.get("/api/payouts", response_model=list[PayoutEventOut])
+async def list_payouts():
     async with AsyncSessionLocal() as session:
-        period = await session.get(TrackingPeriod, period_id)
-        if period is None:
-            raise HTTPException(status_code=404, detail="Period not found")
-        if period.ends_at is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Period must be closed (have an end date) before calculating rewards. "
-                "POST /api/periods/{id}/close first.",
-            )
-
-    eligibilities = await calculate_period_rewards(period_id)
-
-    async with AsyncSessionLocal() as session:
-        member_cache: dict[str, str] = {}
-        results = []
-        for el in eligibilities:
-            if el.member_uuid not in member_cache:
-                member = await session.get(GuildMember, el.member_uuid)
-                member_cache[el.member_uuid] = member.username if member else "unknown"
-            results.append(
-                RewardEligibilityOut(
-                    id=el.id,
-                    period_id=el.period_id,
-                    member_uuid=el.member_uuid,
-                    member_username=member_cache[el.member_uuid],
-                    start_snapshot_id=el.start_snapshot_id,
-                    end_snapshot_id=el.end_snapshot_id,
-                    total_progress=el.total_progress,
-                    notg_progress=el.notg_progress,
-                    nol_progress=el.nol_progress,
-                    tcc_progress=el.tcc_progress,
-                    tna_progress=el.tna_progress,
-                    wtp_progress=el.wtp_progress,
-                    eligibility_status=el.eligibility_status,
-                    notes=el.notes,
-                    rewarded_at=el.rewarded_at,
-                )
-            )
-        return results
-
-
-@app.get("/api/periods/{period_id}/rewards", response_model=list[RewardEligibilityOut])
-async def get_period_rewards(period_id: int):
-    async with AsyncSessionLocal() as session:
-        period = await session.get(TrackingPeriod, period_id)
-        if period is None:
-            raise HTTPException(status_code=404, detail="Period not found")
-
         result = await session.execute(
-            select(RewardEligibility).where(RewardEligibility.period_id == period_id)
+            select(PayoutEvent).order_by(PayoutEvent.created_at.desc())
         )
-        eligibilities = result.scalars().all()
+        events = result.scalars().all()
 
-        member_cache: dict[str, str] = {}
-        results = []
-        for el in eligibilities:
-            if el.member_uuid not in member_cache:
-                member = await session.get(GuildMember, el.member_uuid)
-                member_cache[el.member_uuid] = member.username if member else "unknown"
-            results.append(
-                RewardEligibilityOut(
-                    id=el.id,
-                    period_id=el.period_id,
-                    member_uuid=el.member_uuid,
-                    member_username=member_cache[el.member_uuid],
-                    start_snapshot_id=el.start_snapshot_id,
-                    end_snapshot_id=el.end_snapshot_id,
-                    total_progress=el.total_progress,
-                    notg_progress=el.notg_progress,
-                    nol_progress=el.nol_progress,
-                    tcc_progress=el.tcc_progress,
-                    tna_progress=el.tna_progress,
-                    wtp_progress=el.wtp_progress,
-                    eligibility_status=el.eligibility_status,
-                    notes=el.notes,
-                    rewarded_at=el.rewarded_at,
-                )
+        output = []
+        for event in events:
+            items_result = await session.execute(
+                select(PayoutItem).where(PayoutItem.payout_event_id == event.id)
             )
-        return results
+            event.items = items_result.scalars().all()
+            output.append(PayoutEventOut.model_validate(event))
+
+        return output
 
 
-@app.post("/api/eligibility/{eligibility_id}/mark-rewarded")
-async def mark_rewarded(eligibility_id: int):
+@app.get("/api/payouts/{payout_id}", response_model=PayoutEventOut)
+async def get_payout(payout_id: int):
     async with AsyncSessionLocal() as session:
-        async with session.begin():
-            el = await session.get(RewardEligibility, eligibility_id)
-            if el is None:
-                raise HTTPException(status_code=404, detail="Reward eligibility not found")
-            el.rewarded_at = datetime.now(timezone.utc)
-        await session.commit()
-        return {"status": "ok", "eligibility_id": eligibility_id, "rewarded_at": el.rewarded_at}
+        event = await session.get(PayoutEvent, payout_id)
+        if event is None:
+            raise HTTPException(status_code=404, detail="Payout not found")
+
+        items_result = await session.execute(
+            select(PayoutItem).where(PayoutItem.payout_event_id == payout_id)
+        )
+        event.items = items_result.scalars().all()
+        return PayoutEventOut.model_validate(event)
+
+
+@app.get("/api/members/{uuid}/payouts", response_model=list[MemberPayoutSummary])
+async def get_member_payouts(uuid: str):
+    async with AsyncSessionLocal() as session:
+        member = await session.get(GuildMember, uuid)
+        if member is None:
+            raise HTTPException(status_code=404, detail="Member not found")
+
+        items_result = await session.execute(
+            select(PayoutItem)
+            .where(PayoutItem.member_uuid == uuid)
+            .order_by(PayoutItem.rewarded_at.desc())
+        )
+        all_items = items_result.scalars().all()
+
+        by_event: dict[int, dict] = {}
+        for item in all_items:
+            if item.payout_event_id not in by_event:
+                event = await session.get(PayoutEvent, item.payout_event_id)
+                by_event[item.payout_event_id] = {
+                    "payout_event_id": item.payout_event_id,
+                    "payout_label": event.label if event else None,
+                    "rewarded_at": item.rewarded_at,
+                    "items": [],
+                }
+            by_event[item.payout_event_id]["items"].append(PayoutItemOut.model_validate(item))
+
+        return [MemberPayoutSummary(**v) for v in by_event.values()]
+
+
+@app.get("/api/status", response_model=ServerStatus)
+async def get_status():
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(FetchLog).order_by(FetchLog.started_at.desc())
+        )
+        logs = result.scalars().all()
+
+        total = len(logs)
+        total_ok = sum(1 for l in logs if l.status == "ok")
+        total_errors = sum(1 for l in logs if l.status == "error")
+        recent = logs[:30]
+
+        latest = recent[0] if recent else None
+
+        def log_to_out(log: FetchLog) -> FetchLogEntryOut:
+            duration = None
+            if log.started_at and log.completed_at:
+                duration = (log.completed_at - log.started_at).total_seconds()
+            return FetchLogEntryOut(
+                id=log.id,
+                started_at=log.started_at,
+                completed_at=log.completed_at,
+                status=log.status,
+                snapshot_count=log.snapshot_count,
+                restricted_count=log.restricted_count,
+                error_message=log.error_message,
+                duration_seconds=round(duration, 1) if duration else None,
+            )
+
+        return ServerStatus(
+            latest_fetch=log_to_out(latest) if latest else None,
+            total_fetches=total,
+            total_ok=total_ok,
+            total_errors=total_errors,
+            recent_fetches=[log_to_out(l) for l in recent],
+        )

@@ -1556,6 +1556,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "dotenv" },
     { name = "fastapi", extra = ["standard"] },
+    { name = "httpx" },
     { name = "python-dotenv" },
     { name = "sqlalchemy" },
 ]
@@ -1565,6 +1566,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.140.0" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "sqlalchemy", specifier = ">=2.0.51" },
 ]

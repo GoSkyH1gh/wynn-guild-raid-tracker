@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -23,7 +23,8 @@ class GuildMember(Base):
     is_current_member: Mapped[bool] = mapped_column(Boolean, default=True)
 
     snapshots: Mapped[list["RaidSnapshot"]] = relationship(back_populates="member", cascade="all, delete-orphan")
-    reward_eligibilities: Mapped[list["RewardEligibility"]] = relationship(back_populates="member", cascade="all, delete-orphan")
+    completions: Mapped[list["DetectedCompletion"]] = relationship(back_populates="member", cascade="all, delete-orphan")
+    payout_items: Mapped[list["PayoutItem"]] = relationship(back_populates="member", cascade="all, delete-orphan")
 
 
 class RaidSnapshot(Base):
@@ -46,52 +47,70 @@ class RaidSnapshot(Base):
     member: Mapped["GuildMember"] = relationship(back_populates="snapshots")
 
 
-class TrackingPeriod(Base):
-    __tablename__ = "tracking_periods"
+class RewardDefinition(Base):
+    __tablename__ = "reward_definitions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(128), nullable=False)
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    raid_type: Mapped[str] = mapped_column(String(10), unique=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    reward_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reward_label: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    daily_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
-    reward_eligibilities: Mapped[list["RewardEligibility"]] = relationship(back_populates="period", cascade="all, delete-orphan")
 
-
-class RewardEligibility(Base):
-    __tablename__ = "reward_eligibility"
+class DetectedCompletion(Base):
+    __tablename__ = "detected_completions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    period_id: Mapped[int] = mapped_column(ForeignKey("tracking_periods.id"), nullable=False)
-    member_uuid: Mapped[str] = mapped_column(ForeignKey("guild_members.uuid"), nullable=False)
-
+    member_uuid: Mapped[str] = mapped_column(ForeignKey("guild_members.uuid"), nullable=False, index=True)
+    raid_type: Mapped[str] = mapped_column(String(10), nullable=False)
+    count: Mapped[int] = mapped_column(Integer, nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
     start_snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("raid_snapshots.id"), nullable=True)
     end_snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("raid_snapshots.id"), nullable=True)
 
-    total_progress: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    notg_progress: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    nol_progress: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    tcc_progress: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    tna_progress: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    wtp_progress: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    member: Mapped["GuildMember"] = relationship(back_populates="completions")
+    payout_items: Mapped[list["PayoutItem"]] = relationship(back_populates="completion", cascade="all, delete-orphan")
 
-    eligibility_status: Mapped[str] = mapped_column(
-        Enum(
-            "eligible",
-            "partially_restricted",
-            "restricted_start",
-            "restricted_end",
-            "restricted_both",
-            "insufficient_data",
-            "not_yet_in_guild",
-            "left_guild",
-            name="eligibility_status",
-        ),
-        nullable=False,
-    )
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    rewarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+class PayoutEvent(Base):
+    __tablename__ = "payout_events"
 
-    period: Mapped["TrackingPeriod"] = relationship(back_populates="reward_eligibilities")
-    member: Mapped["GuildMember"] = relationship(back_populates="reward_eligibilities")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    items: Mapped[list["PayoutItem"]] = relationship(back_populates="event", cascade="all, delete-orphan")
+
+
+class FetchLog(Base):
+    __tablename__ = "fetch_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    snapshot_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    restricted_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class PayoutItem(Base):
+    __tablename__ = "payout_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    payout_event_id: Mapped[int] = mapped_column(ForeignKey("payout_events.id"), nullable=False, index=True)
+    detected_completion_id: Mapped[int] = mapped_column(ForeignKey("detected_completions.id"), nullable=False, index=True)
+    member_uuid: Mapped[str] = mapped_column(ForeignKey("guild_members.uuid"), nullable=False, index=True)
+    raid_type: Mapped[str] = mapped_column(String(10), nullable=False)
+    count_paid: Mapped[int] = mapped_column(Integer, nullable=False)
+    reward_amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    rewarded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    event: Mapped["PayoutEvent"] = relationship(back_populates="items")
+    completion: Mapped["DetectedCompletion"] = relationship(back_populates="payout_items")
+    member: Mapped["GuildMember"] = relationship(back_populates="payout_items")

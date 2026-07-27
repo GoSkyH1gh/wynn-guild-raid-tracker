@@ -1,0 +1,131 @@
+export interface GuildMember {
+  uuid: string;
+  username: string;
+  rank: string;
+  first_seen: string;
+  last_seen: string;
+  is_current_member: boolean;
+}
+
+export interface PendingRewardItem {
+  member_uuid: string;
+  username: string;
+  raid_type: string;
+  count_pending: number;
+  earliest_detected: string;
+  latest_detected: string;
+}
+
+export interface PayoutItem {
+  id: number;
+  payout_event_id: number;
+  detected_completion_id: number;
+  member_uuid: string;
+  raid_type: string;
+  count_paid: number;
+  reward_amount: number;
+  rewarded_at: string;
+}
+
+export interface PayoutEvent {
+  id: number;
+  label: string | null;
+  starts_at: string;
+  ends_at: string;
+  created_at: string;
+  items: PayoutItem[];
+}
+
+export interface RewardDefinition {
+  id: number;
+  raid_type: string;
+  display_name: string;
+  reward_amount: number;
+  reward_label: string;
+  daily_cap: number | null;
+  is_active: boolean;
+  sort_order: number;
+}
+
+export const RAID_RUNES: Record<string, { rune: string; color: string }> = {
+  notg: { rune: "Az", color: "#00d4ff" },
+  nol: { rune: "Uth", color: "#b44dff" },
+  tcc: { rune: "Tol", color: "#ff4444" },
+  tna: { rune: "Tol", color: "#ff8844" },
+  wtp: { rune: "Ek", color: "#44ff88" },
+};
+
+export const RAID_LABELS: Record<string, string> = {
+  notg: "Nest of the Grootslangs",
+  nol: "Orphion's Nexus of Light",
+  tcc: "The Canyon Colossus",
+  tna: "The Nameless Anomaly",
+  wtp: "The Wartorn Palace",
+};
+
+const BASE = "";
+
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${url}`, {
+    headers: { "Content-Type": "application/json" },
+    ...init,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
+  }
+  return res.json();
+}
+
+export async function fetchMembers(): Promise<GuildMember[]> {
+  return fetchJson<GuildMember[]>("/api/members?current_only=true");
+}
+
+export async function fetchPendingRewards(
+  from: string,
+  to: string,
+  member_uuid?: string,
+): Promise<PendingRewardItem[]> {
+  let url = `/api/rewards/pending?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  if (member_uuid) url += `&member_uuid=${member_uuid}`;
+  return fetchJson<PendingRewardItem[]>(url);
+}
+
+export async function fetchPayouts(): Promise<PayoutEvent[]> {
+  return fetchJson<PayoutEvent[]>("/api/payouts");
+}
+
+export async function createPayout(body: {
+  label?: string | null;
+  starts_at: string;
+  ends_at: string;
+  items: { member_uuid: string; raid_type: string; count: number }[];
+}): Promise<{ payout_event_id: number }> {
+  return fetchJson("/api/rewards/payout", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export interface FetchLogEntry {
+  id: number;
+  started_at: string;
+  completed_at: string | null;
+  status: string;
+  snapshot_count: number | null;
+  restricted_count: number | null;
+  error_message: string | null;
+  duration_seconds: number | null;
+}
+
+export interface ServerStatus {
+  latest_fetch: FetchLogEntry | null;
+  total_fetches: number;
+  total_ok: number;
+  total_errors: number;
+  recent_fetches: FetchLogEntry[];
+}
+
+export async function fetchServerStatus(): Promise<ServerStatus> {
+  return fetchJson<ServerStatus>("/api/status");
+}

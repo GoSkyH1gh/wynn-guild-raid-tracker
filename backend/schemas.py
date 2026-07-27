@@ -30,40 +30,95 @@ class RaidSnapshotOut(BaseModel):
     was_member: bool
 
 
-class TrackingPeriodOut(BaseModel):
+class TriggerResult(BaseModel):
+    status: str
+    snapshot_count: int
+    restricted_count: int
+    timestamp: datetime
+
+
+class RewardDefinitionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    name: str
-    starts_at: datetime
-    ends_at: datetime | None
+    raid_type: str
+    display_name: str
+    reward_amount: int
+    reward_label: str
+    daily_cap: int | None
     is_active: bool
+    sort_order: int
 
 
-class TrackingPeriodCreate(BaseModel):
-    name: str
-    starts_at: datetime | None = None
-    ends_at: datetime | None = None
+class RewardDefinitionUpdate(BaseModel):
+    reward_amount: int | None = None
+    reward_label: str | None = None
+    display_name: str | None = None
+    daily_cap: int | None = None
+    is_active: bool | None = None
 
 
-class RewardEligibilityOut(BaseModel):
+class DetectedCompletionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    period_id: int
     member_uuid: str
-    member_username: str | None = None
-    start_snapshot_id: int | None
-    end_snapshot_id: int | None
-    total_progress: int | None
-    notg_progress: int | None
-    nol_progress: int | None
-    tcc_progress: int | None
-    tna_progress: int | None
-    wtp_progress: int | None
-    eligibility_status: str
-    notes: str | None
-    rewarded_at: datetime | None
+    raid_type: str
+    count: int
+    detected_at: datetime
+
+
+class PendingRewardItem(BaseModel):
+    member_uuid: str
+    username: str
+    raid_type: str
+    count_pending: int
+    earliest_detected: datetime
+    latest_detected: datetime
+
+
+class PayoutItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    payout_event_id: int
+    detected_completion_id: int
+    member_uuid: str
+    raid_type: str
+    count_paid: int
+    reward_amount: int
+    rewarded_at: datetime
+
+
+class PayoutEventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    label: str | None
+    starts_at: datetime
+    ends_at: datetime
+    created_at: datetime
+    items: list[PayoutItemOut] = []
+
+
+class PayoutCreateItem(BaseModel):
+    member_uuid: str
+    raid_type: str
+    count: int
+
+
+class PayoutCreate(BaseModel):
+    label: str | None = None
+    starts_at: datetime
+    ends_at: datetime
+    items: list[PayoutCreateItem]
+
+
+class PayoutResult(BaseModel):
+    payout_event_id: int
+    label: str | None
+    item_count: int
+    created_at: datetime
 
 
 class MemberHistoryOut(BaseModel):
@@ -73,8 +128,29 @@ class MemberHistoryOut(BaseModel):
     snapshots: list[RaidSnapshotOut]
 
 
-class TriggerResult(BaseModel):
+class MemberPayoutSummary(BaseModel):
+    payout_event_id: int
+    payout_label: str | None
+    rewarded_at: datetime
+    items: list[PayoutItemOut]
+
+
+class FetchLogEntryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    started_at: datetime
+    completed_at: datetime | None
     status: str
-    snapshot_count: int
-    restricted_count: int
-    timestamp: datetime
+    snapshot_count: int | None
+    restricted_count: int | None
+    error_message: str | None
+    duration_seconds: float | None = None
+
+
+class ServerStatus(BaseModel):
+    latest_fetch: FetchLogEntryOut | None
+    total_fetches: int
+    total_ok: int
+    total_errors: int
+    recent_fetches: list[FetchLogEntryOut]
