@@ -52,6 +52,7 @@ let isFetching = false;
 let fetchError: string | null = null;
 let selected: Set<string> = new Set();
 let animateRows = true;
+let confirmingPayoutId: number | null = null;
 let currentUser: CurrentUser | null = null;
 
 function now(): Date {
@@ -194,6 +195,7 @@ function render() {
     btn.addEventListener("click", () => {
       currentView = (btn as HTMLElement).dataset.view as View;
       selected.clear();
+      confirmingPayoutId = null;
       animateRows = true;
       const url = new URL(location.href);
       url.searchParams.set("view", currentView);
@@ -447,10 +449,13 @@ function renderHistory($el: HTMLElement, $status: HTMLElement) {
 
     for (const [uuid, entry] of byMember) {
       const isVoided = payout.status === "voided";
+      const isConfirming = confirmingPayoutId === payout.id;
       const statusHtml = isVoided
         ? `<span class="tag-voided">Voided</span>`
         : currentUser?.is_admin
-          ? `<button class="btn-void" data-payout-id="${payout.id}">Void</button>`
+          ? isConfirming
+            ? `<button class="btn-void btn-void-confirm" data-payout-id="${payout.id}">Confirm void?</button>`
+            : `<button class="btn-void" data-payout-id="${payout.id}">Void</button>`
           : `<span class="text-completed">Completed</span>`;
 
       html += `<tr${isVoided ? ' class="row-voided"' : ""}>
@@ -473,7 +478,23 @@ function renderHistory($el: HTMLElement, $status: HTMLElement) {
   document.querySelectorAll(".btn-void").forEach((btn) =>
     btn.addEventListener("click", (e) => {
       const payoutId = Number((e.currentTarget as HTMLElement).dataset.payoutId);
-      handleVoid(payoutId);
+      e.stopPropagation();
+      if (confirmingPayoutId === payoutId) {
+        confirmingPayoutId = null;
+        handleVoid(payoutId);
+      } else {
+        confirmingPayoutId = payoutId;
+        renderHistory($el, $status);
+      }
+    })
+  );
+  document.querySelectorAll(".btn-void-confirm").forEach((btn) =>
+    btn.addEventListener("keydown", (e) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key === "Escape") {
+        confirmingPayoutId = null;
+        renderHistory($el, $status);
+      }
     })
   );
 }
@@ -619,9 +640,6 @@ async function handlePayout() {
 // ── Void action ────────────────────────────────────────────────
 
 async function handleVoid(payoutId: number) {
-  const confirmed = await showConfirm("Void this payout? This will re-open the completions for future payouts.");
-  if (!confirmed) return;
-
   try {
     await voidPayout(payoutId);
     await fetchData();
@@ -678,44 +696,6 @@ function showToast(msg: string) {
   setTimeout(() => toast!.classList.remove("visible"), 3500);
 }
 
-// ── Confirm modal ──────────────────────────────────────────────
-
-function showConfirm(msg: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.className = "modal-overlay";
-    overlay.innerHTML = `
-      <div class="modal-dialog">
-        <p class="modal-text">${msg}</p>
-        <div class="modal-actions">
-          <button class="btn-modal btn-modal-cancel">Cancel</button>
-          <button class="btn-modal btn-modal-confirm">Confirm</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-
-    const cleanup = () => {
-      if (overlay.parentNode) document.body.removeChild(overlay);
-    };
-
-    overlay.querySelector(".btn-modal-cancel")?.addEventListener("click", () => {
-      cleanup();
-      resolve(false);
-    });
-    overlay.querySelector(".btn-modal-confirm")?.addEventListener("click", () => {
-      cleanup();
-      resolve(true);
-    });
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) {
-        cleanup();
-        resolve(false);
-      }
-    });
-  });
-}
-
 // ── Data fetching ──────────────────────────────────────────────
 
 async function fetchData() {
@@ -768,6 +748,17 @@ async function init() {
       currentUser = null;
     }
   }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && confirmingPayoutId !== null) {
+      confirmingPayoutId = null;
+      if (currentView === "history") {
+        const $el = document.getElementById("content")!;
+        const $statusBarEl = document.getElementById("status-bar")!;
+        renderHistory($el, $statusBarEl);
+      }
+    }
+  });
 
   if (currentUser || isAuthenticated()) {
     render();
