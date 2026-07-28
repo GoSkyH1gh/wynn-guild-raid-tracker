@@ -183,3 +183,14 @@ export interface ServerStatus {
 export async function fetchServerStatus(): Promise<ServerStatus> {
   return fetchJson<ServerStatus>("/api/status");
 }
+
+export interface TriggerResult {
+  status: string;
+  snapshot_count: number;
+  restricted_count: number;
+  timestamp: string;
+}
+
+export async function triggerFetch(): Promise<TriggerResult> {
+  return fetchJson<TriggerResult>("/api/trigger-fetch", { method: "POST" });
+}

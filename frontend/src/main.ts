@@ -6,6 +6,7 @@ import {
   voidPayout,
   fetchDiscordLoginUrl,
   fetchCurrentUser,
+  triggerFetch,
   setToken,
   clearToken,
   isAuthenticated,
@@ -44,9 +45,11 @@ if (errorParam === "unauthorized") {
 
 let currentView: View = (params.get("view") as View) ?? "pending";
 let currentRange: Range = (params.get("range") as Range) ?? "7d";
-let pendingData: PendingRewardItem[] = [];
-let payoutsData: PayoutEvent[] = [];
+let pendingData: PendingRewardItem[] | null = null;
+let payoutsData: PayoutEvent[] | null = null;
 let statusData: ServerStatus | null = null;
+let isFetching = false;
+let fetchError: string | null = null;
 let selected: Set<string> = new Set();
 let animateRows = true;
 let currentUser: CurrentUser | null = null;
@@ -91,8 +94,9 @@ function fmtAgo(iso: string): string {
   return rem > 0 ? `${hrs}h ${rem}m ago` : `${hrs}h ago`;
 }
 
-function groupByMember(items: PendingRewardItem[]): Map<string, { username: string; raids: Record<string, number> }> {
+function groupByMember(items: PendingRewardItem[] | null): Map<string, { username: string; raids: Record<string, number> }> {
   const map = new Map<string, { username: string; raids: Record<string, number> }>();
+  if (!items) return map;
   for (const item of items) {
     const key = item.member_uuid;
     if (!map.has(key)) {
@@ -246,10 +250,24 @@ function renderLogin() {
 // ── Pending view ───────────────────────────────────────────────
 
 function renderPending($el: HTMLElement, $status: HTMLElement, from: Date, to: Date) {
+  if (pendingData === null) {
+    if (isFetching) {
+      $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
+      $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading pending rewards…</p></div>`;
+      return;
+    }
+    if (fetchError) {
+      $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
+      $el.innerHTML = `<div class="error-state"><p>Failed to load pending rewards</p><p class="error-detail">${fetchError}</p><button class="btn-retry">Retry</button></div>`;
+      document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
+      return;
+    }
+  }
+
   const byMember = groupByMember(pendingData);
   const members = Array.from(byMember.entries());
   const totalSelected = Array.from(selected).length;
-  const totalPending = pendingData.reduce((s, i) => s + i.count_pending, 0);
+  const totalPending = pendingData ? pendingData.reduce((s, i) => s + i.count_pending, 0) : 0;
 
   $status.innerHTML = `
     <span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>
@@ -365,9 +383,23 @@ function renderPending($el: HTMLElement, $status: HTMLElement, from: Date, to: D
 // ── History view ───────────────────────────────────────────────
 
 function renderHistory($el: HTMLElement, $status: HTMLElement) {
+  if (payoutsData === null) {
+    if (isFetching) {
+      $status.innerHTML = `<span class="status-info">Payout history</span>`;
+      $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading payout history…</p></div>`;
+      return;
+    }
+    if (fetchError) {
+      $status.innerHTML = `<span class="status-info">Payout history</span>`;
+      $el.innerHTML = `<div class="error-state"><p>Failed to load payout history</p><p class="error-detail">${fetchError}</p><button class="btn-retry">Retry</button></div>`;
+      document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
+      return;
+    }
+  }
+
   $status.innerHTML = `<span class="status-info">Payout history</span>`;
 
-  if (payoutsData.length === 0) {
+  if (!payoutsData || payoutsData.length === 0) {
     $el.innerHTML = `<div class="empty"><p>No payouts recorded yet.</p></div>`;
     return;
   }
@@ -438,7 +470,16 @@ function renderStatus($el: HTMLElement, $status: HTMLElement) {
   $status.innerHTML = `<span class="status-info">Server status</span>`;
 
   if (!statusData) {
-    $el.innerHTML = `<div class="empty"><p>Loading status…</p></div>`;
+    if (isFetching) {
+      $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading status…</p></div>`;
+      return;
+    }
+    if (fetchError) {
+      $el.innerHTML = `<div class="error-state"><p>Failed to load status</p><p class="error-detail">${fetchError}</p><button class="btn-retry">Retry</button></div>`;
+      document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
+      return;
+    }
+    $el.innerHTML = `<div class="empty"><p>No status data available.</p></div>`;
     return;
   }
 
@@ -467,6 +508,9 @@ function renderStatus($el: HTMLElement, $status: HTMLElement) {
           <span class="stat-label">Last Fetch</span>
         </div>
       </div>
+    </div>
+    <div class="fetch-bar">
+      <button id="fetch-now-btn" class="btn-fetch">Fetch Now</button>
     </div>
   `;
 
@@ -511,6 +555,8 @@ function renderStatus($el: HTMLElement, $status: HTMLElement) {
 
   html += `</tbody></table></div>`;
   $el.innerHTML = html;
+
+  document.getElementById("fetch-now-btn")?.addEventListener("click", handleFetchNow);
 }
 
 // ── Payout action ──────────────────────────────────────────────
@@ -572,6 +618,34 @@ async function handleVoid(payoutId: number) {
   }
 }
 
+// ── Fetch now action ───────────────────────────────────────────
+
+async function handleFetchNow() {
+  const $btn = document.getElementById("fetch-now-btn") as HTMLButtonElement | null;
+
+  if ($btn) {
+    $btn.disabled = true;
+    $btn.textContent = "Fetching…";
+  }
+
+  try {
+    const result = await triggerFetch();
+    statusData = await fetchServerStatus();
+    showToast(
+      result.status === "ok"
+        ? `Fetch complete: ${result.snapshot_count} members, ${result.restricted_count} restricted`
+        : `Fetch returned: ${result.status}`,
+    );
+    render();
+  } catch (err) {
+    showToast(`Fetch failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    if ($btn) {
+      $btn.disabled = false;
+      $btn.textContent = "Fetch Now";
+    }
+  }
+}
+
 // ── Toast ──────────────────────────────────────────────────────
 
 function showToast(msg: string) {
@@ -599,6 +673,10 @@ async function fetchData() {
     return;
   }
 
+  isFetching = true;
+  fetchError = null;
+  render();
+
   const { from, to } = rangeFrom(currentRange);
 
   try {
@@ -607,13 +685,17 @@ async function fetchData() {
     }
     payoutsData = await fetchPayouts();
     statusData = await fetchServerStatus();
+    fetchError = null;
   } catch (err) {
     if (!isAuthenticated()) {
       currentUser = null;
     }
-    showToast(`Failed to load data: ${err instanceof Error ? err.message : "error"}`);
+    const msg = err instanceof Error ? err.message : "An error occurred";
+    fetchError = msg;
+    showToast(`Failed to load data: ${msg}`);
   }
 
+  isFetching = false;
   render();
 }
 
