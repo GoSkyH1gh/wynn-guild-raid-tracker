@@ -188,6 +188,9 @@ app.add_middleware(
 async def root():
     return {"message": "Wynn Guild Raids Tracker"}
 
+@app.get("/health/server")
+async def get_health():
+    return {"status": "ok"}
 
 @app.get("/health/database")
 async def database_health():
