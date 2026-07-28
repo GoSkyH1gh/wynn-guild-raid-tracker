@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv, find_dotenv
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, text as sa_text
@@ -305,6 +305,12 @@ async def auth_discord_callback(code: str, state: str | None = None):
 @app.get("/api/auth/me", response_model=CurrentUserOut)
 async def auth_me(current_user: dict = Depends(get_current_user)):
     return CurrentUserOut(**current_user)
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(response: Response):
+    response.delete_cookie("jwt", path="/")
+    return {"message": "Logged out"}
 
 
 @app.get("/api/auth/users", response_model=list[DiscordUserOut])

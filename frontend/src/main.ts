@@ -180,7 +180,12 @@ function render() {
     <div id="status-bar" class="status-bar"></div>
   `;
 
-  document.getElementById("logout-btn")?.addEventListener("click", () => {
+  document.getElementById("logout-btn")?.addEventListener("click", async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // proceed with logout regardless
+    }
     clearToken();
     window.location.reload();
   });
