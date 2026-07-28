@@ -421,6 +421,7 @@ body {
   font-size: 0.7rem;
   font-weight: 600;
   padding: 0.2rem 0.6rem;
+  min-width: 7rem;
   border: 1px solid var(--rune-tcc);
   border-radius: 3px;
   background: transparent;

@@ -481,6 +481,9 @@ function renderHistory($el: HTMLElement, $status: HTMLElement) {
       e.stopPropagation();
       if (confirmingPayoutId === payoutId) {
         confirmingPayoutId = null;
+        const $confirmBtn = e.currentTarget as HTMLButtonElement;
+        $confirmBtn.disabled = true;
+        $confirmBtn.textContent = "Voiding…";
         handleVoid(payoutId);
       } else {
         confirmingPayoutId = payoutId;
