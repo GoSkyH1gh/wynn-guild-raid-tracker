@@ -243,11 +243,20 @@ function renderLogin() {
   `;
 
   document.getElementById("login-btn")?.addEventListener("click", async () => {
+    const $btn = document.getElementById("login-btn") as HTMLButtonElement | null;
+    if ($btn) {
+      $btn.disabled = true;
+      $btn.textContent = "Connecting…";
+    }
     try {
       const url = await fetchDiscordLoginUrl();
       window.location.href = url;
     } catch (err) {
       showToast(`Login failed: ${err instanceof Error ? err.message : "error"}`);
+      if ($btn) {
+        $btn.disabled = false;
+        $btn.textContent = "Login with Discord";
+      }
     }
   });
 }
@@ -610,9 +619,8 @@ async function handlePayout() {
 // ── Void action ────────────────────────────────────────────────
 
 async function handleVoid(payoutId: number) {
-  if (!confirm("Void this payout? This will re-open the completions for future payouts.")) {
-    return;
-  }
+  const confirmed = await showConfirm("Void this payout? This will re-open the completions for future payouts.");
+  if (!confirmed) return;
 
   try {
     await voidPayout(payoutId);
@@ -668,6 +676,44 @@ function showToast(msg: string) {
     toast!.classList.add("visible");
   });
   setTimeout(() => toast!.classList.remove("visible"), 3500);
+}
+
+// ── Confirm modal ──────────────────────────────────────────────
+
+function showConfirm(msg: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `
+      <div class="modal-dialog">
+        <p class="modal-text">${msg}</p>
+        <div class="modal-actions">
+          <button class="btn-modal btn-modal-cancel">Cancel</button>
+          <button class="btn-modal btn-modal-confirm">Confirm</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const cleanup = () => {
+      if (overlay.parentNode) document.body.removeChild(overlay);
+    };
+
+    overlay.querySelector(".btn-modal-cancel")?.addEventListener("click", () => {
+      cleanup();
+      resolve(false);
+    });
+    overlay.querySelector(".btn-modal-confirm")?.addEventListener("click", () => {
+      cleanup();
+      resolve(true);
+    });
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        cleanup();
+        resolve(false);
+      }
+    });
+  });
 }
 
 // ── Data fetching ──────────────────────────────────────────────
