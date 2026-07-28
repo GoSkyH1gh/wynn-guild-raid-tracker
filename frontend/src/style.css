@@ -177,6 +177,7 @@ body {
   font-weight: 600;
   font-size: 0.8rem;
   padding: 0.45rem 1.2rem;
+  min-width: 12rem;
   border: 1px solid var(--accent-light);
   border-radius: var(--radius);
   background: transparent;
@@ -205,6 +206,7 @@ body {
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 0.8rem;
+  min-width: 12rem;
   padding: 0.45rem 1.2rem;
   border: 1px solid var(--accent-light);
   border-radius: var(--radius);
