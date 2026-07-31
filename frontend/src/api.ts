@@ -70,38 +70,16 @@ export const RAID_LABELS: Record<string, string> = {
 
 const BASE = import.meta.env.VITE_API_BASE ?? "";
 
-let _token: string | null = null;
-
-function getToken(): string | null {
-  return _token;
-}
-
-export function setToken(token: string) {
-  _token = token;
-}
-
-export function clearToken() {
-  _token = null;
-}
-
-export function isAuthenticated(): boolean {
-  return !!getToken();
-}
-
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const token = getToken();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
 
   const res = await fetch(`${BASE}${url}`, {
     headers,
+    credentials: "include",
     ...init,
   });
 
   if (res.status === 401) {
-    clearToken();
     throw new Error("Not authenticated");
   }
 

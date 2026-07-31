@@ -7,9 +7,6 @@ import {
   fetchDiscordLoginUrl,
   fetchCurrentUser,
   triggerFetch,
-  setToken,
-  clearToken,
-  isAuthenticated,
   type PendingRewardItem,
   type PayoutEvent,
   type ServerStatus,
@@ -27,16 +24,8 @@ const VIEW_LABELS: Record<View, string> = {
   status: "Status",
 };
 
-const hashParams = new URLSearchParams(location.hash.slice(1));
-const tokenParam = hashParams.get("token");
 const params = new URLSearchParams(location.search);
 const errorParam = params.get("error");
-if (tokenParam) {
-  setToken(tokenParam);
-  const url = new URL(location.href);
-  url.hash = "";
-  history.replaceState(null, "", url.href);
-}
 if (errorParam === "unauthorized") {
   const url = new URL(location.href);
   url.searchParams.delete("error");
@@ -51,6 +40,23 @@ function isoDate(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => {
+    switch (c) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
 }
 
 const _now = new Date();
@@ -151,11 +157,11 @@ function toggleSelect(uuid: string) {
 const $app = document.getElementById("app")!;
 
 function viewBtnHtml(view: View) {
-  return `<button class="view-btn${currentView === view ? " active" : ""}" data-view="${view}">${VIEW_LABELS[view]}</button>`;
+  return `<button class="view-btn${currentView === view ? " active" : ""}" data-view="${escapeHtml(view)}">${VIEW_LABELS[view]}</button>`;
 }
 
 function rangeBtnHtml(r: Range, label: string) {
-  return `<button class="range-btn${currentRange === r ? " active" : ""}" data-range="${r}">${label}</button>`;
+  return `<button class="range-btn${currentRange === r ? " active" : ""}" data-range="${escapeHtml(r)}">${label}</button>`;
 }
 
 function runeTag(rune: string, color: string) {
@@ -163,7 +169,7 @@ function runeTag(rune: string, color: string) {
 }
 
 function render() {
-  if (!isAuthenticated() && !currentUser) {
+  if (!currentUser) {
     renderLogin();
     return;
   }
@@ -174,9 +180,9 @@ function render() {
   const userHtml = currentUser
     ? `<div class="user-info">
         ${currentUser.avatar_url
-          ? `<img class="user-avatar" src="${currentUser.avatar_url}" alt="" width="24" height="24">`
-          : `<span class="user-avatar-fallback">${currentUser.username[0]?.toUpperCase() ?? "?"}</span>`}
-        <span class="user-name">${currentUser.username}</span>
+          ? `<img class="user-avatar" src="${escapeHtml(currentUser.avatar_url)}" alt="" width="24" height="24">`
+          : `<span class="user-avatar-fallback">${escapeHtml(currentUser.username[0]?.toUpperCase() ?? "?")}</span>`}
+        <span class="user-name">${escapeHtml(currentUser.username)}</span>
         <button class="btn-logout" id="logout-btn">Log out</button>
       </div>`
     : "";
@@ -196,16 +202,16 @@ function render() {
         ${showRange
           ? `<div class="range-group">${rangeBtnHtml("7d", "7 days")}${rangeBtnHtml("14d", "14 days")}${rangeBtnHtml("30d", "30 days")}${rangeBtnHtml("all", "All time")}${rangeBtnHtml("custom", "Custom")}</div>
              ${currentRange === "custom"
-               ? `<div class="custom-range">
-                    <label class="date-field">
-                      <span>From</span>
-                      <input type="date" id="range-from" value="${customFrom}" max="${customTo}">
-                    </label>
-                    <label class="date-field">
-                      <span>To</span>
-                      <input type="date" id="range-to" value="${customTo}" min="${customFrom}">
-                    </label>
-                  </div>`
+                ? `<div class="custom-range">
+                     <label class="date-field">
+                       <span>From</span>
+                       <input type="date" id="range-from" value="${escapeHtml(customFrom)}" max="${escapeHtml(customTo)}">
+                     </label>
+                     <label class="date-field">
+                       <span>To</span>
+                       <input type="date" id="range-to" value="${escapeHtml(customTo)}" min="${escapeHtml(customFrom)}">
+                     </label>
+                   </div>`
                : ""}`
           : ""}
       </div>
@@ -218,11 +224,11 @@ function render() {
 
   document.getElementById("logout-btn")?.addEventListener("click", async () => {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     } catch {
       // proceed with logout regardless
     }
-    clearToken();
+    currentUser = null;
     window.location.reload();
   });
 
@@ -339,7 +345,7 @@ function renderPending($el: HTMLElement, $status: HTMLElement, from: Date, to: D
   if (pendingData === null) {
     if (fetchError) {
       $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
-      $el.innerHTML = `<div class="error-state"><p>Failed to load pending rewards</p><p class="error-detail">${fetchError}</p><button class="btn-retry">Retry</button></div>`;
+      $el.innerHTML = `<div class="error-state"><p>Failed to load pending rewards</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
       document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
       return;
     }
@@ -394,9 +400,9 @@ function renderPending($el: HTMLElement, $status: HTMLElement, from: Date, to: D
       ? `style="animation: row-in 0.25s ease both; animation-delay: ${i * 0.03}s"`
       : "";
     html += `
-      <tr class="member-row${sel ? " selected" : ""}" data-uuid="${uuid}" tabindex="0" ${anim}>
-        <td class="col-check"><input type="checkbox" class="row-check" ${sel ? "checked" : ""} data-uuid="${uuid}" aria-label="Select ${entry.username}"></td>
-        <td class="col-member"><span class="member-name">${entry.username}</span></td>
+      <tr class="member-row${sel ? " selected" : ""}" data-uuid="${escapeHtml(uuid)}" tabindex="0" ${anim}>
+        <td class="col-check"><input type="checkbox" class="row-check" ${sel ? "checked" : ""} data-uuid="${escapeHtml(uuid)}" aria-label="Select ${escapeHtml(entry.username)}"></td>
+        <td class="col-member"><span class="member-name">${escapeHtml(entry.username)}</span></td>
         ${RAID_TYPES.map((rt) => {
           const count = entry.raids[rt] ?? 0;
           const info = RAID_RUNES[rt]!;
@@ -473,7 +479,7 @@ function renderHistory($el: HTMLElement, $status: HTMLElement) {
   if (payoutsData === null) {
     if (fetchError) {
       $status.innerHTML = `<span class="status-info">Payout history</span>`;
-      $el.innerHTML = `<div class="error-state"><p>Failed to load payout history</p><p class="error-detail">${fetchError}</p><button class="btn-retry">Retry</button></div>`;
+      $el.innerHTML = `<div class="error-state"><p>Failed to load payout history</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
       document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
       return;
     }
@@ -531,11 +537,14 @@ function renderHistory($el: HTMLElement, $status: HTMLElement) {
         : `<span class="text-completed">Completed</span>`;
 
     html += `<tr class="payout-summary${isVoided ? " row-voided" : ""}${isExpanded ? " expanded" : ""}" data-payout-id="${payout.id}" tabindex="0" aria-expanded="${isExpanded}">
-      <td><span class="chevron" aria-hidden="true">${isExpanded ? "▾" : "▸"}</span>${fmtDate(payout.created_at)}${payout.label ? `<span class="payout-label">${payout.label}</span>` : ""}</td>
-      ${RAID_TYPES.map((rt) => `<td class="rune-cell">${runeTotals[rt] > 0 ? runeTotals[rt] : "—"}</td>`).join("")}
+      <td><span class="chevron" aria-hidden="true">${isExpanded ? "▾" : "▸"}</span>${fmtDate(payout.created_at)}${payout.label ? `<span class="payout-label">${escapeHtml(payout.label)}</span>` : ""}</td>
+      ${RAID_TYPES.map((rt) => {
+        const count = runeTotals[rt] ?? 0;
+        return `<td class="rune-cell">${count > 0 ? count : "—"}</td>`;
+      }).join("")}
       <td><span class="total-runes">${totalRunes(runeTotals)}</span></td>
       <td>${byMember.size}</td>
-      <td>${payout.paid_by_username ?? "—"}</td>
+      <td>${escapeHtml(payout.paid_by_username ?? "—")}</td>
       <td class="col-status">${statusHtml}</td>
     </tr>`;
 
@@ -555,10 +564,14 @@ function renderHistory($el: HTMLElement, $status: HTMLElement) {
           <tbody>
           ${Array.from(byMember.entries())
             .map(([uuid, entry]) => {
-              const memberName = entry.username.length > 24 ? `${entry.username.slice(0, 24)}…` : entry.username;
+              const safeName = escapeHtml(entry.username);
+              const memberName = safeName.length > 24 ? `${safeName.slice(0, 24)}…` : safeName;
               return `<tr>
-                <td class="col-member"><span class="member-name" title="${entry.username}">${memberName}</span></td>
-                ${RAID_TYPES.map((rt) => `<td>${entry.raids[rt] > 0 ? entry.raids[rt] : "—"}</td>`).join("")}
+                <td class="col-member"><span class="member-name" title="${safeName}">${memberName}</span></td>
+                ${RAID_TYPES.map((rt) => {
+                  const count = entry.raids[rt] ?? 0;
+                  return `<td>${count > 0 ? count : "—"}</td>`;
+                }).join("")}
                 <td><span class="total-runes">${totalRunes(entry.raids)}</span></td>
               </tr>`;
             })
@@ -627,7 +640,7 @@ function renderStatus($el: HTMLElement, $status: HTMLElement) {
 
   if (!statusData) {
     if (fetchError) {
-      $el.innerHTML = `<div class="error-state"><p>Failed to load status</p><p class="error-detail">${fetchError}</p><button class="btn-retry">Retry</button></div>`;
+      $el.innerHTML = `<div class="error-state"><p>Failed to load status</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
       document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
       return;
     }
@@ -671,7 +684,7 @@ function renderStatus($el: HTMLElement, $status: HTMLElement) {
     const members = latest.snapshot_count ?? "—";
     html += `<div class="status-detail">
       <p><strong>Latest fetch</strong> — ${fmtDate(latest.started_at)} (${fmtAgo(latest.started_at)})</p>
-      <p>Took ${duration} · ${members} members (${latest.restricted_count ?? 0} restricted) · status: ${latest.status}
+      <p>Took ${duration} · ${members} members (${latest.restricted_count ?? 0} restricted) · status: ${escapeHtml(latest.status)}
     </p></div>`;
   }
 
@@ -694,14 +707,14 @@ function renderStatus($el: HTMLElement, $status: HTMLElement) {
     const members = log.snapshot_count ?? "—";
     const restricted = log.restricted_count ?? "—";
     const statusClass = log.status === "ok" ? "tag-ok" : log.status === "error" ? "tag-err" : "tag-run";
-    const statusLabel = log.status === "running" ? "running…" : log.status;
+    const statusLabel = escapeHtml(log.status === "running" ? "running…" : log.status);
     html += `<tr>
       <td>${fmtDate(log.started_at)}</td>
       <td>${dur}</td>
       <td>${members}</td>
       <td>${restricted}</td>
       <td><span class="status-tag ${statusClass}">${statusLabel}</span></td>
-      <td class="err-cell">${log.error_message ? log.error_message.slice(0, 60) : "—"}</td>
+      <td class="err-cell">${log.error_message ? escapeHtml(log.error_message.slice(0, 60)) : "—"}</td>
     </tr>`;
   }
 
@@ -816,7 +829,7 @@ function showToast(msg: string) {
 // ── Data fetching ──────────────────────────────────────────────
 
 async function fetchData() {
-  if (!isAuthenticated() && !currentUser) {
+  if (!currentUser) {
     render();
     return;
   }
@@ -835,7 +848,7 @@ async function fetchData() {
     statusData = await fetchServerStatus();
     fetchError = null;
   } catch (err) {
-    if (!isAuthenticated()) {
+    if (err instanceof Error && err.message === "Not authenticated") {
       currentUser = null;
     }
     const msg = err instanceof Error ? err.message : "An error occurred";
@@ -850,20 +863,10 @@ async function fetchData() {
 // ── Init ───────────────────────────────────────────────────────
 
 async function init() {
-  if (isAuthenticated()) {
-    try {
-      currentUser = await fetchCurrentUser();
-    } catch {
-      clearToken();
-    }
-  }
-
-  if (!currentUser && !isAuthenticated()) {
-    try {
-      currentUser = await fetchCurrentUser();
-    } catch {
-      currentUser = null;
-    }
+  try {
+    currentUser = await fetchCurrentUser();
+  } catch {
+    currentUser = null;
   }
 
   document.addEventListener("keydown", (e) => {
@@ -877,7 +880,7 @@ async function init() {
     }
   });
 
-  if (currentUser || isAuthenticated()) {
+  if (currentUser) {
     render();
     fetchData();
     setInterval(fetchData, 60000);

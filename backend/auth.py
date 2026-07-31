@@ -40,25 +40,46 @@ _raw = os.getenv("AUTHORIZED_DISCORD_IDS", "")
 if _raw:
     AUTHORIZED_DISCORD_IDS = {x.strip() for x in _raw.split(",") if x.strip()}
 
-_oauth_states: set[str] = set()
+_oauth_states: dict[str, datetime] = {}
+OAUTH_STATE_TTL_SECONDS = 10 * 60
+MAX_OAUTH_STATES = 10_000
+
+
+def _prune_oauth_states() -> None:
+    now = datetime.now(timezone.utc)
+    expired = [k for k, expires_at in _oauth_states.items() if expires_at <= now]
+    for k in expired:
+        _oauth_states.pop(k, None)
 
 
 def create_oauth_state() -> str:
+    _prune_oauth_states()
+    if len(_oauth_states) >= MAX_OAUTH_STATES:
+        # Evict the oldest states so a flooding attacker cannot permanently
+        # exhaust memory or lock out legitimate logins.
+        evict = sorted(_oauth_states, key=_oauth_states.get)[
+            : len(_oauth_states) - MAX_OAUTH_STATES // 2
+        ]
+        for k in evict:
+            _oauth_states.pop(k, None)
     state = secrets.token_urlsafe(32)
-    _oauth_states.add(state)
+    _oauth_states[state] = datetime.now(timezone.utc) + timedelta(
+        seconds=OAUTH_STATE_TTL_SECONDS
+    )
     return state
 
 
 def consume_oauth_state(state: str) -> bool:
-    if state in _oauth_states:
-        _oauth_states.discard(state)
-        return True
-    return False
+    _prune_oauth_states()
+    expires_at = _oauth_states.pop(state, None)
+    if expires_at is None or expires_at <= datetime.now(timezone.utc):
+        return False
+    return True
 
 
-def create_jwt(discord_id: str) -> str:
+def create_jwt(discord_id: str, token_version: int = 0) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=SESSION_EXPIRE_DAYS)
-    payload = {"sub": discord_id, "exp": expire}
+    payload = {"sub": discord_id, "exp": expire, "ver": token_version}
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
@@ -128,16 +149,57 @@ def _extract_jwt(request: Request) -> str | None:
     return None
 
 
+def _cookie_secure() -> bool:
+    if os.getenv("JWT_COOKIE_SECURE", "").strip().lower() == "true":
+        return True
+    return (os.getenv("FRONTEND_URL", "") or "").startswith("https://")
+
+
+def _cookie_samesite() -> str:
+    samesite = os.getenv("JWT_COOKIE_SAMESITE", "lax").strip().lower()
+    if samesite not in ("lax", "strict", "none"):
+        samesite = "lax"
+    return samesite
+
+
 def set_jwt_cookie(response: Response, token: str) -> None:
+    samesite = _cookie_samesite()
     response.set_cookie(
         key="jwt",
         value=token,
         httponly=True,
-        samesite="lax",
-        secure=False,  # set True in production when using HTTPS
+        samesite=samesite,
+        secure=_cookie_secure() or samesite == "none",
         max_age=60 * 60 * 24 * SESSION_EXPIRE_DAYS,
         path="/",
     )
+
+
+def delete_jwt_cookie(response: Response) -> None:
+    samesite = _cookie_samesite()
+    response.delete_cookie(
+        key="jwt",
+        path="/",
+        samesite=samesite,
+        secure=_cookie_secure() or samesite == "none",
+    )
+
+
+async def revoke_user_token(request: Request) -> None:
+    token = _extract_jwt(request)
+    if not token:
+        return
+    payload = decode_jwt(token)
+    if not payload or not payload.get("sub"):
+        return
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(DiscordUser).where(DiscordUser.discord_id == payload["sub"])
+        )
+        user = result.scalar_one_or_none()
+        if user is not None:
+            user.token_version += 1
+            await session.commit()
 
 
 async def get_current_user(request: Request) -> dict:
@@ -148,13 +210,19 @@ async def get_current_user(request: Request) -> dict:
     if payload is None:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+    discord_id = payload.get("sub")
+    if not discord_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(DiscordUser).where(DiscordUser.discord_id == payload["sub"])
+            select(DiscordUser).where(DiscordUser.discord_id == discord_id)
         )
         user = result.scalar_one_or_none()
         if user is None:
             raise HTTPException(status_code=401, detail="User not authorized")
+        if payload.get("ver", 0) != user.token_version:
+            raise HTTPException(status_code=401, detail="Session has been revoked")
         return {
             "discord_id": user.discord_id,
             "username": user.username,

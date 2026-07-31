@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv, find_dotenv
-from fastapi import FastAPI, HTTPException, Query, Depends, Response
+from fastapi import FastAPI, HTTPException, Query, Depends, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, text as sa_text
@@ -23,6 +23,8 @@ from .auth import (
     create_oauth_state,
     consume_oauth_state,
     set_jwt_cookie,
+    delete_jwt_cookie,
+    revoke_user_token,
 )
 from .database import AsyncSessionLocal, engine, verify_database_connection
 from .models import (
@@ -159,6 +161,12 @@ async def lifespan(app: FastAPI):
             sa_text(
                 "ALTER TABLE payout_events "
                 "ADD COLUMN IF NOT EXISTS paid_by_username VARCHAR(64)"
+            )
+        )
+        await session.execute(
+            sa_text(
+                "ALTER TABLE discord_users "
+                "ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0"
             )
         )
         await session.commit()
@@ -314,9 +322,9 @@ async def auth_discord_callback(code: str, state: str | None = None):
 
         await session.commit()
 
-    jwt_token = create_jwt(discord_id)
+    jwt_token = create_jwt(discord_id, user.token_version)
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    redirect_url = f"{frontend_url.rstrip('/')}/#token={jwt_token}"
+    redirect_url = f"{frontend_url.rstrip('/')}/"
     response = RedirectResponse(url=redirect_url, status_code=303)
     set_jwt_cookie(response, jwt_token)
     return response
@@ -328,8 +336,9 @@ async def auth_me(current_user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/auth/logout")
-async def auth_logout(response: Response):
-    response.delete_cookie("jwt", path="/")
+async def auth_logout(request: Request, response: Response):
+    await revoke_user_token(request)
+    delete_jwt_cookie(response)
     return {"message": "Logged out"}
 
 
