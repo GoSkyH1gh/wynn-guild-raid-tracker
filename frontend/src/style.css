@@ -131,9 +131,10 @@ body {
 
 .custom-range {
   display: flex;
+  flex-basis: 100%;
   gap: 0.75rem;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
   flex-wrap: wrap;
   margin-top: 0.5rem;
 }
@@ -876,6 +877,10 @@ body {
   }
 
   .view-toggle, .range-group {
+    justify-content: center;
+  }
+
+  .custom-range {
     justify-content: center;
   }
 

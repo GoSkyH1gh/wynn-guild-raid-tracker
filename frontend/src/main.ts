@@ -330,12 +330,13 @@ function renderLogin() {
 // ── Pending view ───────────────────────────────────────────────
 
 function renderPending($el: HTMLElement, $status: HTMLElement, from: Date, to: Date) {
+  if (isFetching) {
+    $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
+    $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading pending rewards…</p></div>`;
+    return;
+  }
+
   if (pendingData === null) {
-    if (isFetching) {
-      $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
-      $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading pending rewards…</p></div>`;
-      return;
-    }
     if (fetchError) {
       $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
       $el.innerHTML = `<div class="error-state"><p>Failed to load pending rewards</p><p class="error-detail">${fetchError}</p><button class="btn-retry">Retry</button></div>`;
@@ -463,12 +464,13 @@ function renderPending($el: HTMLElement, $status: HTMLElement, from: Date, to: D
 // ── History view ───────────────────────────────────────────────
 
 function renderHistory($el: HTMLElement, $status: HTMLElement) {
+  if (isFetching) {
+    $status.innerHTML = `<span class="status-info">Payout history</span>`;
+    $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading payout history…</p></div>`;
+    return;
+  }
+
   if (payoutsData === null) {
-    if (isFetching) {
-      $status.innerHTML = `<span class="status-info">Payout history</span>`;
-      $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading payout history…</p></div>`;
-      return;
-    }
     if (fetchError) {
       $status.innerHTML = `<span class="status-info">Payout history</span>`;
       $el.innerHTML = `<div class="error-state"><p>Failed to load payout history</p><p class="error-detail">${fetchError}</p><button class="btn-retry">Retry</button></div>`;
@@ -618,11 +620,12 @@ function renderHistory($el: HTMLElement, $status: HTMLElement) {
 function renderStatus($el: HTMLElement, $status: HTMLElement) {
   $status.innerHTML = `<span class="status-info">Server status</span>`;
 
+  if (isFetching) {
+    $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading status…</p></div>`;
+    return;
+  }
+
   if (!statusData) {
-    if (isFetching) {
-      $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading status…</p></div>`;
-      return;
-    }
     if (fetchError) {
       $el.innerHTML = `<div class="error-state"><p>Failed to load status</p><p class="error-detail">${fetchError}</p><button class="btn-retry">Retry</button></div>`;
       document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
