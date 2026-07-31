@@ -18,7 +18,7 @@ import {
 } from "./api.js";
 
 type View = "pending" | "history" | "status";
-type Range = "7d" | "14d" | "30d" | "all";
+type Range = "7d" | "14d" | "30d" | "all" | "custom";
 
 const RAID_TYPES = ["notg", "nol", "tcc", "tna", "wtp"];
 const VIEW_LABELS: Record<View, string> = {
@@ -45,6 +45,19 @@ if (errorParam === "unauthorized") {
 
 let currentView: View = (params.get("view") as View) ?? "pending";
 let currentRange: Range = (params.get("range") as Range) ?? "7d";
+
+function isoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+const _now = new Date();
+const _defaultFrom = new Date(_now);
+_defaultFrom.setDate(_defaultFrom.getDate() - 7);
+let customFrom = params.get("from") ?? isoDate(_defaultFrom);
+let customTo = params.get("to") ?? isoDate(_now);
 let pendingData: PendingRewardItem[] | null = null;
 let payoutsData: PayoutEvent[] | null = null;
 let statusData: ServerStatus | null = null;
@@ -62,6 +75,13 @@ function now(): Date {
 
 function rangeFrom(r: Range): { from: Date; to: Date } {
   const to = now();
+  if (r === "custom" && customFrom && customTo) {
+    const from = new Date(`${customFrom}T00:00:00`);
+    const toEnd = new Date(`${customTo}T23:59:59.999`);
+    if (!Number.isNaN(from.getTime()) && !Number.isNaN(toEnd.getTime()) && from <= toEnd) {
+      return { from, to: toEnd };
+    }
+  }
   const from = new Date(to);
   if (r === "7d") from.setDate(from.getDate() - 7);
   else if (r === "14d") from.setDate(from.getDate() - 14);
@@ -173,7 +193,21 @@ function render() {
     <main class="main">
       <div class="controls">
         <div class="view-toggle">${viewBtnHtml("pending")}${viewBtnHtml("history")}${viewBtnHtml("status")}</div>
-        ${showRange ? `<div class="range-group">${rangeBtnHtml("7d", "7 days")}${rangeBtnHtml("14d", "14 days")}${rangeBtnHtml("30d", "30 days")}${rangeBtnHtml("all", "All time")}</div>` : ""}
+        ${showRange
+          ? `<div class="range-group">${rangeBtnHtml("7d", "7 days")}${rangeBtnHtml("14d", "14 days")}${rangeBtnHtml("30d", "30 days")}${rangeBtnHtml("all", "All time")}${rangeBtnHtml("custom", "Custom")}</div>
+             ${currentRange === "custom"
+               ? `<div class="custom-range">
+                    <label class="date-field">
+                      <span>From</span>
+                      <input type="date" id="range-from" value="${customFrom}" max="${customTo}">
+                    </label>
+                    <label class="date-field">
+                      <span>To</span>
+                      <input type="date" id="range-to" value="${customTo}" min="${customFrom}">
+                    </label>
+                  </div>`
+               : ""}`
+          : ""}
       </div>
 
       <div id="content" class="content-area"></div>
@@ -213,11 +247,40 @@ function render() {
       animateRows = true;
       const url = new URL(location.href);
       url.searchParams.set("range", currentRange);
+      if (currentRange !== "custom") {
+        url.searchParams.delete("from");
+        url.searchParams.delete("to");
+      }
       history.replaceState(null, "", url.href);
       render();
       fetchData();
     })
   );
+
+  const applyCustomRange = () => {
+    const $from = document.getElementById("range-from") as HTMLInputElement | null;
+    const $to = document.getElementById("range-to") as HTMLInputElement | null;
+    if (!$from || !$to) return;
+    if (!$from.value && !$to.value) return;
+    if (!$from.value) $from.value = customFrom;
+    if (!$to.value) $to.value = customTo;
+    if ($from.value > $to.value) $to.value = $from.value;
+    customFrom = $from.value;
+    customTo = $to.value;
+    currentRange = "custom";
+    selected.clear();
+    animateRows = true;
+    const url = new URL(location.href);
+    url.searchParams.set("range", "custom");
+    url.searchParams.set("from", customFrom);
+    url.searchParams.set("to", customTo);
+    history.replaceState(null, "", url.href);
+    render();
+    fetchData();
+  };
+
+  document.getElementById("range-from")?.addEventListener("change", applyCustomRange);
+  document.getElementById("range-to")?.addEventListener("change", applyCustomRange);
 
   const $contentEl = document.getElementById("content")!;
   const $statusBarEl = document.getElementById("status-bar")!;
