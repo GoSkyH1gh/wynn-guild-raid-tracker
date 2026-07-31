@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, text as sa_text
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from .auth import (
     AUTHORIZED_DISCORD_IDS,
@@ -147,6 +147,18 @@ async def lifespan(app: FastAPI):
             sa_text(
                 "ALTER TABLE payout_events "
                 "ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ"
+            )
+        )
+        await session.execute(
+            sa_text(
+                "ALTER TABLE payout_events "
+                "ADD COLUMN IF NOT EXISTS paid_by_discord_id VARCHAR(32)"
+            )
+        )
+        await session.execute(
+            sa_text(
+                "ALTER TABLE payout_events "
+                "ADD COLUMN IF NOT EXISTS paid_by_username VARCHAR(64)"
             )
         )
         await session.commit()
@@ -516,6 +528,8 @@ async def create_payout(body: PayoutCreate, admin_user: dict = Depends(get_admin
         ends_at=body.ends_at,
         items=[item.model_dump() for item in body.items],
         label=body.label,
+        paid_by_discord_id=admin_user["discord_id"],
+        paid_by_username=admin_user["username"],
     )
 
     return PayoutResult(
@@ -531,7 +545,7 @@ async def list_payouts(current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(PayoutEvent)
-            .options(selectinload(PayoutEvent.items))
+            .options(selectinload(PayoutEvent.items).joinedload(PayoutItem.member))
             .order_by(PayoutEvent.created_at.desc())
         )
         events = result.scalars().all()
@@ -545,7 +559,7 @@ async def get_payout(payout_id: int, current_user: dict = Depends(get_current_us
         event = await session.get(
             PayoutEvent,
             payout_id,
-            options=[selectinload(PayoutEvent.items)],
+            options=[selectinload(PayoutEvent.items).joinedload(PayoutItem.member)],
         )
         if event is None:
             raise HTTPException(status_code=404, detail="Payout not found")
@@ -582,6 +596,7 @@ async def get_member_payouts(uuid: str, current_user: dict = Depends(get_current
 
         items_result = await session.execute(
             select(PayoutItem)
+            .options(joinedload(PayoutItem.member))
             .where(PayoutItem.member_uuid == uuid)
             .order_by(PayoutItem.rewarded_at.desc())
         )

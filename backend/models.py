@@ -85,6 +85,8 @@ class PayoutEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     status: Mapped[str] = mapped_column(String(16), default="completed")
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_by_discord_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    paid_by_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     items: Mapped[list["PayoutItem"]] = relationship(back_populates="event", cascade="all, delete-orphan")
 
@@ -128,3 +130,7 @@ class PayoutItem(Base):
     event: Mapped["PayoutEvent"] = relationship(back_populates="items")
     completion: Mapped["DetectedCompletion"] = relationship(back_populates="payout_items")
     member: Mapped["GuildMember"] = relationship(back_populates="payout_items")
+
+    @property
+    def member_username(self) -> str | None:
+        return self.member.username if self.member else None

@@ -328,6 +328,8 @@ async def process_payout(
     ends_at: datetime,
     items: list[dict],
     label: str | None = None,
+    paid_by_discord_id: str | None = None,
+    paid_by_username: str | None = None,
 ) -> tuple[int, str | None, int, datetime]:
     item_count = 0
 
@@ -337,6 +339,8 @@ async def process_payout(
                 label=label,
                 starts_at=starts_at,
                 ends_at=ends_at,
+                paid_by_discord_id=paid_by_discord_id,
+                paid_by_username=paid_by_username,
             )
             session.add(payout_event)
             await session.flush()

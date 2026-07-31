@@ -84,6 +84,7 @@ class PayoutItemOut(BaseModel):
     payout_event_id: int
     detected_completion_id: int
     member_uuid: str
+    member_username: str | None = None
     raid_type: str
     count_paid: int
     reward_amount: int
@@ -100,6 +101,8 @@ class PayoutEventOut(BaseModel):
     created_at: datetime
     status: str = "completed"
     voided_at: datetime | None = None
+    paid_by_discord_id: str | None = None
+    paid_by_username: str | None = None
     items: list[PayoutItemOut] = []
 
 

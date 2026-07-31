@@ -396,6 +396,65 @@ body {
   color: var(--text-dim);
 }
 
+.history-table th.col-status,
+.history-table td.col-status {
+  width: 8.5rem;
+  white-space: nowrap;
+}
+
+.payout-summary {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.payout-summary:hover {
+  background: #2a3d3a;
+}
+
+.payout-summary td:first-child {
+  text-align: left;
+  padding-left: 0.75rem;
+  white-space: nowrap;
+}
+
+.payout-summary .chevron {
+  display: inline-block;
+  width: 0.9rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  margin-right: 0.25rem;
+}
+
+.payout-label {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+.payout-summary td.rune-cell {
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.payout-detail td {
+  padding: 0;
+  border-bottom: none;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+.detail-table th {
+  padding: 0.5rem 0.5rem 0.4rem;
+}
+
+.detail-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
 .row-voided td {
   opacity: 0.5;
 }

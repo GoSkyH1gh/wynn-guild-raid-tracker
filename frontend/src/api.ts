@@ -21,6 +21,7 @@ export interface PayoutItem {
   payout_event_id: number;
   detected_completion_id: number;
   member_uuid: string;
+  member_username: string | null;
   raid_type: string;
   count_paid: number;
   reward_amount: number;
@@ -35,6 +36,8 @@ export interface PayoutEvent {
   created_at: string;
   status: string;
   voided_at: string | null;
+  paid_by_discord_id: string | null;
+  paid_by_username: string | null;
   items: PayoutItem[];
 }
 

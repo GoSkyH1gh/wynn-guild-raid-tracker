@@ -53,6 +53,7 @@ let fetchError: string | null = null;
 let selected: Set<string> = new Set();
 let animateRows = true;
 let confirmingPayoutId: number | null = null;
+let expandedPayoutId: number | null = null;
 let currentUser: CurrentUser | null = null;
 
 function now(): Date {
@@ -424,56 +425,103 @@ function renderHistory($el: HTMLElement, $status: HTMLElement) {
     <thead>
       <tr>
         <th>Date</th>
-        <th>Label</th>
-        <th>Member</th>
         ${RAID_TYPES.map((rt) => {
           const info = RAID_RUNES[rt]!;
-          return `<th>${info.rune}</th>`;
+          return `<th>${info.rune}<span class="rune-label">${rt}</span></th>`;
         }).join("")}
         <th>Total</th>
-        <th>Status</th>
+        <th>Members</th>
+        <th>Paid by</th>
+        <th class="col-status">Status</th>
       </tr>
     </thead>
     <tbody>
   `;
 
   for (const payout of payoutsData) {
+    const isVoided = payout.status === "voided";
+    const isExpanded = expandedPayoutId === payout.id;
+
     const byMember = new Map<string, { username: string; raids: Record<string, number> }>();
     for (const item of payout.items) {
       if (!byMember.has(item.member_uuid)) {
-        byMember.set(item.member_uuid, { username: item.member_uuid, raids: {} });
+        byMember.set(item.member_uuid, { username: item.member_username ?? item.member_uuid, raids: {} });
       }
       const entry = byMember.get(item.member_uuid)!;
       entry.raids[item.raid_type] = (entry.raids[item.raid_type] ?? 0) + item.count_paid;
     }
 
-    for (const [uuid, entry] of byMember) {
-      const isVoided = payout.status === "voided";
-      const isConfirming = confirmingPayoutId === payout.id;
-      const statusHtml = isVoided
-        ? `<span class="tag-voided">Voided</span>`
-        : currentUser?.is_admin
-          ? isConfirming
-            ? `<button class="btn-void btn-void-confirm" data-payout-id="${payout.id}">Confirm void?</button>`
-            : `<button class="btn-void" data-payout-id="${payout.id}">Void</button>`
-          : `<span class="text-completed">Completed</span>`;
+    const runeTotals: Record<string, number> = {};
+    for (const rt of RAID_TYPES) {
+      runeTotals[rt] = Array.from(byMember.values()).reduce((s, e) => s + (e.raids[rt] ?? 0), 0);
+    }
 
-      html += `<tr${isVoided ? ' class="row-voided"' : ""}>
-        <td>${fmtDate(payout.created_at)}</td>
-        <td>${payout.label ?? "—"}</td>
-        <td>${entry.username.slice(0, 8)}…</td>
-        ${RAID_TYPES.map((rt) => {
-          const c = entry.raids[rt] ?? 0;
-          return `<td>${c > 0 ? c : "—"}</td>`;
-        }).join("")}
-        <td><span class="total-runes">${totalRunes(entry.raids)}</span></td>
-        <td>${statusHtml}</td>
-      </tr>`;
+    const isConfirming = confirmingPayoutId === payout.id;
+    const statusHtml = isVoided
+      ? `<span class="tag-voided">Voided</span>`
+      : currentUser?.is_admin
+        ? isConfirming
+          ? `<button class="btn-void btn-void-confirm" data-payout-id="${payout.id}">Confirm void?</button>`
+          : `<button class="btn-void" data-payout-id="${payout.id}">Void</button>`
+        : `<span class="text-completed">Completed</span>`;
+
+    html += `<tr class="payout-summary${isVoided ? " row-voided" : ""}${isExpanded ? " expanded" : ""}" data-payout-id="${payout.id}" tabindex="0" aria-expanded="${isExpanded}">
+      <td><span class="chevron" aria-hidden="true">${isExpanded ? "▾" : "▸"}</span>${fmtDate(payout.created_at)}${payout.label ? `<span class="payout-label">${payout.label}</span>` : ""}</td>
+      ${RAID_TYPES.map((rt) => `<td class="rune-cell">${runeTotals[rt] > 0 ? runeTotals[rt] : "—"}</td>`).join("")}
+      <td><span class="total-runes">${totalRunes(runeTotals)}</span></td>
+      <td>${byMember.size}</td>
+      <td>${payout.paid_by_username ?? "—"}</td>
+      <td class="col-status">${statusHtml}</td>
+    </tr>`;
+
+    if (isExpanded) {
+      html += `<tr class="payout-detail${isVoided ? " row-voided" : ""}"><td colspan="10">
+        <table class="raid-table detail-table">
+          <thead>
+            <tr>
+              <th class="col-member">Member</th>
+              ${RAID_TYPES.map((rt) => {
+                const info = RAID_RUNES[rt]!;
+                return `<th>${info.rune}<span class="rune-label">${rt}</span></th>`;
+              }).join("")}
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+          ${Array.from(byMember.entries())
+            .map(([uuid, entry]) => {
+              const memberName = entry.username.length > 24 ? `${entry.username.slice(0, 24)}…` : entry.username;
+              return `<tr>
+                <td class="col-member"><span class="member-name" title="${entry.username}">${memberName}</span></td>
+                ${RAID_TYPES.map((rt) => `<td>${entry.raids[rt] > 0 ? entry.raids[rt] : "—"}</td>`).join("")}
+                <td><span class="total-runes">${totalRunes(entry.raids)}</span></td>
+              </tr>`;
+            })
+            .join("")}
+          </tbody>
+        </table>
+      </td></tr>`;
     }
   }
 
   html += `</tbody></table></div>`;
   $el.innerHTML = html;
+
+  document.querySelectorAll(".payout-summary").forEach((row) => {
+    const toggle = (e?: Event) => {
+      if (e && (e.target as HTMLElement).closest(".btn-void")) return;
+      const payoutId = Number((row as HTMLElement).dataset.payoutId);
+      expandedPayoutId = expandedPayoutId === payoutId ? null : payoutId;
+      renderHistory($el, $status);
+    };
+    row.addEventListener("click", toggle);
+    row.addEventListener("keydown", (e) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key !== "Enter" && ke.key !== " ") return;
+      ke.preventDefault();
+      toggle(e);
+    });
+  });
 
   document.querySelectorAll(".btn-void").forEach((btn) =>
     btn.addEventListener("click", (e) => {
