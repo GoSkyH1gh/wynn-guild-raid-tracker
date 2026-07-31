@@ -324,7 +324,7 @@ async def auth_discord_callback(code: str, state: str | None = None):
 
     jwt_token = create_jwt(discord_id, user.token_version)
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    redirect_url = f"{frontend_url.rstrip('/')}/"
+    redirect_url = f"{frontend_url.rstrip('/')}/#token={jwt_token}"
     response = RedirectResponse(url=redirect_url, status_code=303)
     set_jwt_cookie(response, jwt_token)
     return response

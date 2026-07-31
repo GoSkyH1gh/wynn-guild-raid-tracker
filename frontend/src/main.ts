@@ -7,6 +7,10 @@ import {
   fetchDiscordLoginUrl,
   fetchCurrentUser,
   triggerFetch,
+  setToken,
+  clearToken,
+  getToken,
+  isAuthenticated,
   type PendingRewardItem,
   type PayoutEvent,
   type ServerStatus,
@@ -24,8 +28,16 @@ const VIEW_LABELS: Record<View, string> = {
   status: "Status",
 };
 
+const hashParams = new URLSearchParams(location.hash.slice(1));
+const tokenParam = hashParams.get("token");
 const params = new URLSearchParams(location.search);
 const errorParam = params.get("error");
+if (tokenParam) {
+  setToken(tokenParam);
+  const url = new URL(location.href);
+  url.hash = "";
+  history.replaceState(null, "", url.href);
+}
 if (errorParam === "unauthorized") {
   const url = new URL(location.href);
   url.searchParams.delete("error");
@@ -169,7 +181,7 @@ function runeTag(rune: string, color: string) {
 }
 
 function render() {
-  if (!currentUser) {
+  if (!isAuthenticated() && !currentUser) {
     renderLogin();
     return;
   }
@@ -223,11 +235,17 @@ function render() {
   `;
 
   document.getElementById("logout-btn")?.addEventListener("click", async () => {
+    const token = getToken();
     try {
-      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
     } catch {
       // proceed with logout regardless
     }
+    clearToken();
     currentUser = null;
     window.location.reload();
   });
@@ -829,7 +847,7 @@ function showToast(msg: string) {
 // ── Data fetching ──────────────────────────────────────────────
 
 async function fetchData() {
-  if (!currentUser) {
+  if (!isAuthenticated() && !currentUser) {
     render();
     return;
   }
@@ -848,7 +866,7 @@ async function fetchData() {
     statusData = await fetchServerStatus();
     fetchError = null;
   } catch (err) {
-    if (err instanceof Error && err.message === "Not authenticated") {
+    if (!isAuthenticated()) {
       currentUser = null;
     }
     const msg = err instanceof Error ? err.message : "An error occurred";
@@ -866,7 +884,9 @@ async function init() {
   try {
     currentUser = await fetchCurrentUser();
   } catch {
-    currentUser = null;
+    if (!isAuthenticated()) {
+      currentUser = null;
+    }
   }
 
   document.addEventListener("keydown", (e) => {
@@ -880,7 +900,7 @@ async function init() {
     }
   });
 
-  if (currentUser) {
+  if (currentUser || isAuthenticated()) {
     render();
     fetchData();
     setInterval(fetchData, 60000);
