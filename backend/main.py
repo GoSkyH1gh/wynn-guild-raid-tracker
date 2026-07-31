@@ -57,7 +57,7 @@ from .schemas import (
     TriggerResult,
     MemberPayoutSummary,
 )
-from .tracker import _aggregate_pending, process_payout, snapshot_guild
+from .tracker import _aggregate_pending, _record_fetch_log, process_payout, snapshot_guild
 
 load_dotenv(find_dotenv())
 
@@ -96,14 +96,6 @@ async def _seed_reward_definitions():
         await session.commit()
 
 
-async def _create_fetch_log() -> int:
-    async with AsyncSessionLocal() as session:
-        log = FetchLog(started_at=datetime.now(timezone.utc), status="running")
-        session.add(log)
-        await session.commit()
-        return log.id
-
-
 async def _periodic_fetch():
     token = os.getenv("WYNN_TOKEN")
     guild_uuid = os.getenv("GUILD_UUID")
@@ -112,19 +104,27 @@ async def _periodic_fetch():
         return
 
     while True:
-        log_id = await _create_fetch_log()
+        started_at = datetime.now(timezone.utc)
         try:
-            result = await snapshot_guild(token, guild_uuid, fetch_log_id=log_id)
+            result = await snapshot_guild(token, guild_uuid)
+            error_message = None if result["status"] == "ok" else "API returned no data"
+            await _record_fetch_log(
+                started_at,
+                result["status"],
+                result["timestamp"],
+                snapshot_count=result["snapshot_count"],
+                restricted_count=result["restricted_count"],
+                error_message=error_message,
+            )
             logger.info("Background fetch: %s", result)
         except Exception as e:
             logger.exception("Background fetch failed")
-            async with AsyncSessionLocal() as session:
-                log = await session.get(FetchLog, log_id)
-                if log:
-                    log.completed_at = datetime.now(timezone.utc)
-                    log.status = "error"
-                    log.error_message = str(e)[:512]
-                    await session.commit()
+            await _record_fetch_log(
+                started_at,
+                "error",
+                datetime.now(timezone.utc),
+                error_message=str(e)[:512],
+            )
 
         await asyncio.sleep(FETCH_INTERVAL_SECONDS)
 
@@ -152,6 +152,14 @@ async def lifespan(app: FastAPI):
         await session.commit()
 
     await _seed_reward_definitions()
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(FetchLog).where(FetchLog.status == "running"))
+        for log in result.scalars().all():
+            log.status = "error"
+            log.completed_at = datetime.now(timezone.utc)
+            log.error_message = "Server restarted before fetch completed"
+        await session.commit()
 
     global _background_task
     _background_task = asyncio.create_task(_periodic_fetch())
@@ -368,11 +376,25 @@ async def trigger_fetch(current_user: dict = Depends(get_current_user)):
             status_code=500, detail="WYNN_TOKEN or GUILD_UUID not configured"
         )
 
-    log_id = await _create_fetch_log()
+    started_at = datetime.now(timezone.utc)
     try:
-        result = await snapshot_guild(token, guild_uuid, fetch_log_id=log_id)
+        result = await snapshot_guild(token, guild_uuid)
         if result["status"] == "error":
+            await _record_fetch_log(
+                started_at,
+                "error",
+                result["timestamp"],
+                error_message="API returned no data",
+            )
             raise HTTPException(status_code=502, detail="API fetch failed")
+
+        await _record_fetch_log(
+            started_at,
+            "ok",
+            result["timestamp"],
+            snapshot_count=result["snapshot_count"],
+            restricted_count=result["restricted_count"],
+        )
 
         return TriggerResult(
             status=result["status"],
@@ -383,13 +405,12 @@ async def trigger_fetch(current_user: dict = Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        async with AsyncSessionLocal() as session:
-            log = await session.get(FetchLog, log_id)
-            if log:
-                log.completed_at = datetime.now(timezone.utc)
-                log.status = "error"
-                log.error_message = str(e)[:512]
-                await session.commit()
+        await _record_fetch_log(
+            started_at,
+            "error",
+            datetime.now(timezone.utc),
+            error_message=str(e)[:512],
+        )
         raise HTTPException(status_code=500, detail=str(e)[:256])
 
 

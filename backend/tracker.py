@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import select, func
+from sqlalchemy import or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import AsyncSessionLocal
@@ -31,11 +31,10 @@ async def fetch_guild_data(token: str, guild_uuid: str) -> dict | None:
             return None
 
 
-async def snapshot_guild(token: str, guild_uuid: str, fetch_log_id: int | None = None) -> dict:
+async def snapshot_guild(token: str, guild_uuid: str) -> dict:
     now = datetime.now(timezone.utc)
     data = await fetch_guild_data(token, guild_uuid)
     if data is None:
-        await _update_fetch_log(fetch_log_id, "error", now, error_message="API returned no data")
         return {"status": "error", "snapshot_count": 0, "restricted_count": 0, "timestamp": now}
 
     members_raw = data.get("members", {})
@@ -77,8 +76,6 @@ async def snapshot_guild(token: str, guild_uuid: str, fetch_log_id: int | None =
             former_members = await _handle_departed_members(session, seen_uuids, now)
             snapshot_count += former_members
 
-    await _update_fetch_log(fetch_log_id, "ok", now, snapshot_count, restricted_count)
-
     return {
         "status": "ok",
         "snapshot_count": snapshot_count,
@@ -87,30 +84,25 @@ async def snapshot_guild(token: str, guild_uuid: str, fetch_log_id: int | None =
     }
 
 
-async def _update_fetch_log(
-    log_id: int | None,
+async def _record_fetch_log(
+    started_at: datetime,
     status: str,
     completed_at: datetime,
     snapshot_count: int | None = None,
     restricted_count: int | None = None,
     error_message: str | None = None,
 ):
-    if log_id is None:
-        return
     async with AsyncSessionLocal() as session:
-        log = await session.get(FetchLog, log_id)
-        if log:
-            log.completed_at = completed_at
-            log.status = status
-            if snapshot_count is not None:
-                log.snapshot_count = snapshot_count
-            if restricted_count is not None:
-                log.restricted_count = restricted_count
-            if error_message:
-                log.error_message = error_message
-            await session.commit()
-        else:
-            logger.warning("FetchLog %s not found — cannot update status to %s", log_id, status)
+        log = FetchLog(
+            started_at=started_at,
+            completed_at=completed_at,
+            status=status,
+            snapshot_count=snapshot_count,
+            restricted_count=restricted_count,
+            error_message=error_message,
+        )
+        session.add(log)
+        await session.commit()
 
 
 async def _upsert_member(session: AsyncSession, uuid: str, username: str, rank: str, now: datetime):
@@ -206,6 +198,14 @@ async def _detect_completions(session: AsyncSession, member_uuid: str, new_snaps
             RaidSnapshot.id < new_snapshot_id,
             RaidSnapshot.access_restricted == False,  # noqa: E712
             RaidSnapshot.was_member == True,  # noqa: E712
+            or_(
+                RaidSnapshot.total != 0,
+                RaidSnapshot.notg != 0,
+                RaidSnapshot.nol != 0,
+                RaidSnapshot.tcc != 0,
+                RaidSnapshot.tna != 0,
+                RaidSnapshot.wtp != 0,
+            ),
         )
         .order_by(RaidSnapshot.timestamp.desc())
         .limit(1)
