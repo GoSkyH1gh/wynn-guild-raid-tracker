@@ -653,7 +653,6 @@ function renderPayouts($el: HTMLElement, $status: HTMLElement) {
         <th>Raid</th>
         <th>Day</th>
         <th>Runes</th>
-        <th>Count</th>
         <th class="col-member">Paid by</th>
         <th class="col-action"></th>
       </tr>
@@ -674,7 +673,6 @@ function renderPayouts($el: HTMLElement, $status: HTMLElement) {
       <td class="col-member"><span class="member-name">${escapeHtml(p.member_username)}</span></td>
       <td class="overview-cell">${runeTag(info.rune, info.color)}</td>
       <td>${fmtDay(p.day)}</td>
-      <td>${p.reward_amount}</td>
       <td>${p.count_paid}</td>
       <td class="col-member">${p.paid_by_username ? escapeHtml(p.paid_by_username) : "—"}</td>
       <td class="col-action">${action || "—"}</td>

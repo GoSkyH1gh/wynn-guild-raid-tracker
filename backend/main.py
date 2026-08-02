@@ -85,7 +85,7 @@ async def _seed_reward_definitions():
                     RewardDefinition(
                         raid_type=rt["name"],
                         display_name=rt["display"],
-                        reward_amount=0,
+                        reward_amount=1,
                         reward_label="",
                         sort_order=i,
                         is_active=True,
