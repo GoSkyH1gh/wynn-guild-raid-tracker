@@ -536,6 +536,7 @@ body {
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   white-space: nowrap;
+  min-width: 5.75rem;
 }
 
 .btn-pay:hover:not(:disabled) {
@@ -598,13 +599,41 @@ body {
 }
 
 .col-action {
-  width: 7rem;
+  width: 8rem;
 }
 
 .btn-pay-confirm {
   background: color-mix(in srgb, var(--rune-tcc) 20%, transparent);
   border-color: var(--rune-tcc);
   color: var(--rune-tcc);
+}
+
+.btn-pay-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: progress;
+  opacity: 0.85;
+}
+
+.btn-spinner {
+  width: 0.7rem;
+  height: 0.7rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent-text);
+  border-radius: 50%;
+  animation: spin 0.65s linear infinite;
+  flex-shrink: 0;
+}
+
+tr.voiding td {
+  animation: row-fade 1.2s ease forwards;
+}
+
+@keyframes row-fade {
+  0% { opacity: 1; }
+  70% { opacity: 0.35; }
+  100% { opacity: 0.35; }
 }
 
 .loading-state {

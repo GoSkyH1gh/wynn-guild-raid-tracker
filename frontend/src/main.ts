@@ -91,6 +91,7 @@ let fetchError: string | null = null;
 let expandedMember: string | null = null;
 let perDayCache = new Map<string, RewardDay[] | null>();
 let perDayLoading = new Set<string>();
+let voidingPayoutId: number | null = null;
 let payingMember: string | null = null;
 let confirmingVoidId: number | null = null;
 let currentUser: CurrentUser | null = null;
@@ -622,6 +623,17 @@ async function loadSummary() {
 
 // ── Payouts view ───────────────────────────────────────────────
 
+function voidActionHtml(p: PayoutRecord): string {
+  if (!currentUser?.is_admin) return `<span class="text-muted-cell">—</span>`;
+  if (voidingPayoutId === p.id) {
+    return `<button class="btn-pay btn-pay-busy" disabled><span class="btn-spinner"></span>Voiding…</button>`;
+  }
+  if (confirmingVoidId === p.id) {
+    return `<button class="btn-pay btn-pay-confirm" data-void="${p.id}">Confirm void?</button>`;
+  }
+  return `<button class="btn-pay" data-void="${p.id}">Void</button>`;
+}
+
 function renderPayouts($el: HTMLElement, $status: HTMLElement) {
   $status.innerHTML = `<span class="status-info">Payout history</span>`;
 
@@ -662,20 +674,14 @@ function renderPayouts($el: HTMLElement, $status: HTMLElement) {
 
   for (const p of payoutsData) {
     const info = RAID_RUNES[p.raid_type] ?? { rune: p.raid_type, color: "var(--text-muted)" };
-    const isConfirming = confirmingVoidId === p.id;
-    const action = currentUser?.is_admin
-      ? isConfirming
-        ? `<button class="btn-pay btn-pay-confirm" data-void="${p.id}">Confirm void?</button>`
-        : `<button class="btn-pay" data-void="${p.id}">Void</button>`
-      : "";
-    html += `<tr>
+    html += `<tr class="${voidingPayoutId === p.id ? "voiding" : ""}">
       <td>${fmtDate(p.paid_at)}</td>
       <td class="col-member"><span class="member-name">${escapeHtml(p.member_username)}</span></td>
       <td class="overview-cell">${runeTag(info.rune, info.color)}</td>
       <td>${fmtDay(p.day)}</td>
       <td>${p.count_paid}</td>
       <td class="col-member">${p.paid_by_username ? escapeHtml(p.paid_by_username) : "—"}</td>
-      <td class="col-action">${action || "—"}</td>
+      <td class="col-action">${voidActionHtml(p)}</td>
     </tr>`;
   }
 
@@ -698,9 +704,11 @@ function renderPayouts($el: HTMLElement, $status: HTMLElement) {
 }
 
 async function handleVoid(payoutId: number) {
+  voidingPayoutId = payoutId;
+  confirmingVoidId = null;
+  render();
   try {
     await voidPayoutRecord(payoutId);
-    confirmingVoidId = null;
     const { from, to } = rangeFrom(currentRange);
     payoutsData = await fetchPayoutRecords();
     if (currentView === "payouts") {
@@ -711,10 +719,11 @@ async function handleVoid(payoutId: number) {
     }
     showToast("Payout voided");
   } catch (err) {
-    confirmingVoidId = null;
     const msg = err instanceof Error ? err.message : "error";
     showToast(`Failed to void payout: ${msg}`);
   }
+  voidingPayoutId = null;
+  render();
 }
 
 // ── Status view ────────────────────────────────────────────────
