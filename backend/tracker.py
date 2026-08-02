@@ -1,12 +1,14 @@
 import logging
-from datetime import datetime, timezone
+import os
+from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 import httpx
-from sqlalchemy import or_, select, func
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import AsyncSessionLocal
-from .models import GuildMember, RaidSnapshot, DetectedCompletion, PayoutEvent, PayoutItem, RewardDefinition, FetchLog
+from .models import GuildMember, RaidSnapshot, DetectedCompletion, FetchLog, PayoutRecord, RewardDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +16,16 @@ BASE_WYNN_URL = "https://api.wynncraft.com/v3/guild/uuid/"
 GUILD_RANKS = ["owner", "chief", "strategist", "captain", "recruiter", "recruit"]
 
 RAID_TYPES = ["notg", "nol", "tcc", "tna", "wtp"]
+
+# Ranks that earn payouts. Everyone else is tracked but never paid.
+REWARD_RANKS = {"recruit", "recruiter", "captain"}
+
+CAP_DAY_OFFSET_MINUTES = int(os.getenv("CAP_DAY_OFFSET_MINUTES", "0"))
+
+
+def day_bucket(ts: datetime) -> date:
+    """Bucket a detection timestamp into a payout day, shifted by the configured offset."""
+    return (ts + timedelta(minutes=CAP_DAY_OFFSET_MINUTES)).date()
 
 
 async def fetch_guild_data(token: str, guild_uuid: str) -> dict | None:
@@ -238,168 +250,277 @@ async def _detect_completions(session: AsyncSession, member_uuid: str, new_snaps
             session.add(completion)
 
 
-async def _get_pending_completions(
+# ── Reward / payout logic ───────────────────────────────────────
+
+
+async def get_reward_summary(
     session: AsyncSession,
     starts_at: datetime,
     ends_at: datetime,
     member_uuid: str | None = None,
-) -> list[dict]:
-    total_paid_subq = (
-        select(
-            PayoutItem.detected_completion_id,
-            func.coalesce(func.sum(PayoutItem.count_paid), 0).label("total_paid"),
-        )
-        .join(PayoutEvent, PayoutItem.payout_event_id == PayoutEvent.id)
-        .where(PayoutEvent.status != "voided")
-        .group_by(PayoutItem.detected_completion_id)
-        .subquery()
-    )
+) -> list[dict[str, Any]]:
+    """Per (member, raid) payables/paid/pending in a range, after rank gate + daily cap."""
+    rows = await _reward_rows(session, starts_at, ends_at, member_uuid)
 
-    stmt = (
-        select(
-            DetectedCompletion,
-            func.coalesce(total_paid_subq.c.total_paid, 0).label("paid_sofar"),
+    members = {
+        m.uuid: m
+        for m in await _load_members(session, {r["member_uuid"] for r in rows} | ({member_uuid} if member_uuid else set()))
+    }
+    defs = await _load_reward_defs(session)
+
+    out: dict[tuple[str, str], dict] = {}
+    for row in rows:
+        member = members.get(row["member_uuid"])
+        if member is None:
+            continue
+        cap = defs.get(row["raid_type"], {}).get("cap")
+        key = (row["member_uuid"], row["raid_type"])
+        entry = out.setdefault(
+            key,
+            {
+                "member_uuid": row["member_uuid"],
+                "username": member.username,
+                "rank": member.rank,
+                "is_eligible": member.rank in REWARD_RANKS,
+                "raid_type": row["raid_type"],
+                "days": 0,
+                "detected": 0,
+                "payable": 0,
+                "paid": 0,
+                "pending": 0,
+                "daily_cap": cap,
+            },
         )
-        .outerjoin(total_paid_subq, DetectedCompletion.id == total_paid_subq.c.detected_completion_id)
+        entry["days"] += 1
+        entry["detected"] += row["detected"]
+        entry["payable"] += row["payable"]
+        entry["paid"] += row["paid"]
+        entry["pending"] += row["pending"]
+
+    result = list(out.values())
+    result.sort(key=lambda x: (x["member_uuid"], x["raid_type"]))
+    return result
+
+
+async def get_reward_per_day(
+    session: AsyncSession,
+    starts_at: datetime,
+    ends_at: datetime,
+    member_uuid: str | None = None,
+) -> list[dict[str, Any]]:
+    """Per (member, raid, day) breakdown. Returns list of {day, entries: [...]}."""
+    rows = await _reward_rows(session, starts_at, ends_at, member_uuid)
+
+    seen = {r["member_uuid"] for r in rows}
+    members = {m.uuid: m for m in await _load_members(session, seen | ({member_uuid} if member_uuid else set()))}
+    defs = await _load_reward_defs(session)
+
+    by_day: dict[date, list[dict]] = {}
+    for row in rows:
+        member = members.get(row["member_uuid"])
+        cap = defs.get(row["raid_type"], {}).get("cap")
+        day_entry = {
+            "member_uuid": row["member_uuid"],
+            "username": member.username if member else "unknown",
+            "rank": member.rank if member else "",
+            "is_eligible": (member.rank in REWARD_RANKS) if member else False,
+            "raid_type": row["raid_type"],
+            "daily_cap": cap,
+            "detected": row["detected"],
+            "payable": row["payable"],
+            "paid": row["paid"],
+            "pending": row["pending"],
+            "over_cap": max(0, row["detected"] - row["payable"]),
+        }
+        by_day.setdefault(row["day"], []).append(day_entry)
+
+    result = [
+        {"day": day.isoformat(), "entries": sorted(by_day[day], key=lambda e: (e["username"], e["raid_type"]))}
+        for day in sorted(by_day)
+    ]
+    return result
+
+
+async def _reward_rows(
+    session: AsyncSession,
+    starts_at: datetime,
+    ends_at: datetime,
+    member_uuid: str | None = None,
+) -> list[dict[str, Any]]:
+    """Raw per (member, raid, day) rows with detected/payable/paid/pending after cap."""
+    defs = await _load_reward_defs(session)
+
+    # detected completions grouped by (member, raid, day)
+    detected_completion_stmt = (
+        select(
+            DetectedCompletion.member_uuid,
+            DetectedCompletion.raid_type,
+            DetectedCompletion.detected_at,
+            DetectedCompletion.count,
+        )
         .where(
             DetectedCompletion.detected_at >= starts_at,
             DetectedCompletion.detected_at <= ends_at,
         )
     )
-
     if member_uuid:
-        stmt = stmt.where(DetectedCompletion.member_uuid == member_uuid)
+        detected_completion_stmt = detected_completion_stmt.where(
+            DetectedCompletion.member_uuid == member_uuid
+        )
+    completions = (await session.execute(detected_completion_stmt)).all()
 
-    result = await session.execute(stmt)
-    rows = result.all()
+    # already-paid chunks (keyed by day bucket from the payout, not detected_at)
+    paid_stmt = (select(PayoutRecord)).where(
+        PayoutRecord.paid_at >= starts_at,
+        PayoutRecord.paid_at <= ends_at,
+    )
+    if member_uuid:
+        paid_stmt = paid_stmt.where(PayoutRecord.member_uuid == member_uuid)
+    paid_rows = (await session.execute(paid_stmt)).scalars().all()
 
-    pending: list[dict] = []
-    for dc, paid_sofar in rows:
-        remaining = dc.count - paid_sofar
-        if remaining > 0:
-            pending.append({
-                "completion": dc,
-                "remaining": remaining,
-            })
+    earnable: dict[tuple[str, str, date], int] = {}
+    paid: dict[tuple[str, str, date], int] = {}
 
-    return pending
+    for dc in completions:
+        day = day_bucket(dc.detected_at)
+        key = (dc.member_uuid, dc.raid_type, day)
+        earnable[key] = earnable.get(key, 0) + dc.count
 
+    for pr in paid_rows:
+        key = (pr.member_uuid, pr.raid_type, pr.day)
+        paid[key] = paid.get(key, 0) + pr.count_paid
 
-async def _aggregate_pending(
-    session: AsyncSession,
-    starts_at: datetime,
-    ends_at: datetime,
-    member_uuid: str | None = None,
-) -> list[dict]:
-    pending = await _get_pending_completions(session, starts_at, ends_at, member_uuid)
+    members = {m.uuid: m for m in await _load_members(session, {k[0] for k in earnable} | {k[0] for k in paid})}
+    ranks = {uuid: members[uuid].rank for uuid in members}
 
-    member_cache: dict[str, str] = {}
-    agg: dict[tuple[str, str], dict] = {}
+    rows: list[dict[str, Any]] = []
+    for (uuid, raid_type, day), detected in earnable.items():
+        cap = defs.get(raid_type, {}).get("cap")
+        is_eligible = ranks.get(uuid, "") in REWARD_RANKS
 
-    for entry in pending:
-        dc = entry["completion"]
-        key = (dc.member_uuid, dc.raid_type)
+        earned_visible = detected if is_eligible else 0
+        payable = min(earned_visible, cap) if cap is not None else earned_visible
+        paid_count = paid.get((uuid, raid_type, day), 0)
 
-        if key not in agg:
-            if dc.member_uuid not in member_cache:
-                member = await session.get(GuildMember, dc.member_uuid)
-                member_cache[dc.member_uuid] = member.username if member else "unknown"
-
-            agg[key] = {
-                "member_uuid": dc.member_uuid,
-                "username": member_cache[dc.member_uuid],
-                "raid_type": dc.raid_type,
-                "count_pending": 0,
-                "earliest_detected": dc.detected_at,
-                "latest_detected": dc.detected_at,
+        rows.append(
+            {
+                "member_uuid": uuid,
+                "raid_type": raid_type,
+                "day": day,
+                "detected": detected,
+                "payable": payable,
+                "paid": paid_count,
+                "pending": max(0, payable - paid_count),
             }
+        )
+    return rows
 
-        agg[key]["count_pending"] += entry["remaining"]
-        if dc.detected_at < agg[key]["earliest_detected"]:
-            agg[key]["earliest_detected"] = dc.detected_at
-        if dc.detected_at > agg[key]["latest_detected"]:
-            agg[key]["latest_detected"] = dc.detected_at
 
-    return sorted(agg.values(), key=lambda x: (x["username"], x["raid_type"]))
+async def _load_members(session: AsyncSession, uuids: set[str]) -> list[GuildMember]:
+    if not uuids:
+        return []
+    result = await session.execute(select(GuildMember).where(GuildMember.uuid.in_(uuids)))
+    return result.scalars().all()
+
+
+async def _load_reward_defs(session: AsyncSession) -> dict[str, dict]:
+    result = await session.execute(select(RewardDefinition))
+    defs = {}
+    for d in result.scalars().all():
+        defs[d.raid_type] = {
+            "cap": d.daily_cap,
+            "reward_amount": d.reward_amount,
+        }
+    return defs
 
 
 async def process_payout(
+    session: AsyncSession,
     starts_at: datetime,
     ends_at: datetime,
-    items: list[dict],
-    label: str | None = None,
+    items: list[dict[str, Any]],
     paid_by_discord_id: str | None = None,
     paid_by_username: str | None = None,
-) -> tuple[int, str | None, int, datetime]:
-    item_count = 0
+) -> list[dict[str, Any]]:
+    """Pay out capped amounts. Items: [{member_uuid, raid_type, count}].
 
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            payout_event = PayoutEvent(
-                label=label,
-                starts_at=starts_at,
-                ends_at=ends_at,
+    Created payout chunks: per (member, raid, day).
+    """
+    rows = await _reward_rows(session, starts_at, ends_at)
+    defs = await _load_reward_defs(session)
+
+    chunks: list[PayoutRecord] = []
+    for item in items:
+        member_uuid = item["member_uuid"]
+        raid_type = item["raid_type"]
+        count_to_pay = int(item["count"])
+        if count_to_pay <= 0:
+            continue
+
+        member = await session.get(GuildMember, member_uuid)
+        if member is None or member.rank not in REWARD_RANKS:
+            raise ValueError(f"{member.username if member else member_uuid} is not payout-eligible")
+
+        # available payout per (raid, day) within range
+        available: dict[date, int] = {}
+        for row in rows:
+            if row["member_uuid"] == member_uuid and row["raid_type"] == raid_type:
+                if row["pending"] > 0:
+                    available[row["day"]] = row["pending"]
+
+        # iterate days oldest first, pay as many as possible up to limit
+        for day in sorted(available):
+            if count_to_pay <= 0:
+                break
+            take = min(count_to_pay, available[day])
+            reward_amount = (defs.get(raid_type, {}).get("reward_amount") or 0) * take
+            pr = PayoutRecord(
+                member_uuid=member_uuid,
+                raid_type=raid_type,
+                day=day,
+                count_paid=take,
+                reward_amount=reward_amount,
                 paid_by_discord_id=paid_by_discord_id,
                 paid_by_username=paid_by_username,
             )
-            session.add(payout_event)
-            await session.flush()
+            session.add(pr)
+            chunks.append(pr)
+            count_to_pay -= take
 
-            for item in items:
-                member_uuid = item["member_uuid"]
-                raid_type = item["raid_type"]
-                count_to_pay = item["count"]
+        if count_to_pay > 0:
+            logger.warning(
+                "Could only pay part of %s %s for %s (unpaid %d)",
+                raid_type,
+                member_uuid,
+                item["count"],
+                count_to_pay,
+            )
 
-                if count_to_pay <= 0:
-                    continue
+    await session.commit()
+    return [{"day": c.day.isoformat(), "member_uuid": c.member_uuid, "raid_type": c.raid_type, "count_paid": c.count_paid} for c in chunks]
 
-                pending = await _get_pending_completions(
-                    session, starts_at, ends_at, member_uuid=member_uuid
-                )
 
-                matching = [p for p in pending if p["completion"].raid_type == raid_type]
-                matching.sort(key=lambda p: p["completion"].detected_at)
-
-                still_needed = count_to_pay
-                for entry in matching:
-                    if still_needed <= 0:
-                        break
-
-                    dc = entry["completion"]
-                    take = min(still_needed, entry["remaining"])
-
-                    reward_def_result = await session.execute(
-                        select(RewardDefinition).where(
-                            RewardDefinition.raid_type == raid_type,
-                            RewardDefinition.is_active == True,  # noqa: E712
-                        )
-                    )
-                    reward_def = reward_def_result.scalar_one_or_none()
-                    unit_amount = reward_def.reward_amount if reward_def else 0
-
-                    payout_item = PayoutItem(
-                        payout_event_id=payout_event.id,
-                        detected_completion_id=dc.id,
-                        member_uuid=member_uuid,
-                        raid_type=raid_type,
-                        count_paid=take,
-                        reward_amount=take * unit_amount,
-                    )
-                    session.add(payout_item)
-                    item_count += 1
-                    still_needed -= take
-
-                if still_needed > 0:
-                    logger.warning(
-                        "Could only pay %d/%d of %s %s for %s",
-                        count_to_pay - still_needed,
-                        count_to_pay,
-                        raid_type,
-                        member_uuid,
-                    )
-
-        payout_event_id = payout_event.id
-        payout_label = payout_event.label
-        payout_created_at = payout_event.created_at
-
-    return payout_event_id, payout_label, item_count, payout_created_at
+async def list_payouts(
+    session: AsyncSession,
+) -> list[dict[str, Any]]:
+    result = await session.execute(
+        select(PayoutRecord, GuildMember.username)
+        .outerjoin(GuildMember, GuildMember.uuid == PayoutRecord.member_uuid)
+        .order_by(PayoutRecord.paid_at.desc())
+    )
+    rows = result.all()
+    return [
+        {
+            "id": p.id,
+            "member_uuid": p.member_uuid,
+            "member_username": username or p.member_uuid,
+            "raid_type": p.raid_type,
+            "day": p.day.isoformat(),
+            "count_paid": p.count_paid,
+            "reward_amount": p.reward_amount,
+            "paid_at": p.paid_at,
+            "paid_by_discord_id": p.paid_by_discord_id,
+            "paid_by_username": p.paid_by_username,
+        }
+        for p, username in rows
+    ]

@@ -68,48 +68,44 @@ class DetectedCompletionOut(BaseModel):
     detected_at: datetime
 
 
-class PendingRewardItem(BaseModel):
+class MemberHistoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    member: GuildMemberOut
+    snapshots: list[RaidSnapshotOut]
+
+
+class RewardSummaryOut(BaseModel):
     member_uuid: str
     username: str
+    rank: str
+    is_eligible: bool
     raid_type: str
-    count_pending: int
-    earliest_detected: datetime
-    latest_detected: datetime
+    days: int
+    detected: int
+    payable: int
+    paid: int
+    pending: int
+    daily_cap: int | None
 
 
-class PayoutItemOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    payout_event_id: int
-    detected_completion_id: int
+class RewardDayEntryOut(BaseModel):
     member_uuid: str
-    member_username: str | None = None
+    username: str
+    rank: str
+    is_eligible: bool
     raid_type: str
-    count_paid: int
-    reward_amount: int
-    rewarded_at: datetime
+    daily_cap: int | None
+    detected: int
+    payable: int
+    paid: int
+    pending: int
+    over_cap: int
 
 
-class PayoutEventOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    label: str | None
-    starts_at: datetime
-    ends_at: datetime
-    created_at: datetime
-    status: str = "completed"
-    voided_at: datetime | None = None
-    paid_by_discord_id: str | None = None
-    paid_by_username: str | None = None
-    items: list[PayoutItemOut] = []
-
-
-class VoidPayoutResult(BaseModel):
-    payout_event_id: int
-    status: str
-    voided_at: datetime
+class RewardDayOut(BaseModel):
+    day: str
+    entries: list[RewardDayEntryOut]
 
 
 class PayoutCreateItem(BaseModel):
@@ -119,31 +115,34 @@ class PayoutCreateItem(BaseModel):
 
 
 class PayoutCreate(BaseModel):
-    label: str | None = None
     starts_at: datetime
     ends_at: datetime
     items: list[PayoutCreateItem]
 
 
-class PayoutResult(BaseModel):
-    payout_event_id: int
-    label: str | None
-    item_count: int
-    created_at: datetime
+class PayoutChunkOut(BaseModel):
+    day: str
+    member_uuid: str
+    raid_type: str
+    count_paid: int
 
 
-class MemberHistoryOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class PayoutRecordOut(BaseModel):
+    id: int
+    member_uuid: str
+    member_username: str
+    raid_type: str
+    day: str
+    count_paid: int
+    reward_amount: int
+    paid_at: datetime
+    paid_by_discord_id: str | None
+    paid_by_username: str | None
 
-    member: GuildMemberOut
-    snapshots: list[RaidSnapshotOut]
 
-
-class MemberPayoutSummary(BaseModel):
-    payout_event_id: int
-    payout_label: str | None
-    rewarded_at: datetime
-    items: list[PayoutItemOut]
+class VoidPayoutResult(BaseModel):
+    payout_id: int
+    status: str
 
 
 class DiscordUserOut(BaseModel):
