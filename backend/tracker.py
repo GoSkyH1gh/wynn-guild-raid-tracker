@@ -369,10 +369,11 @@ async def _reward_rows(
         )
     completions = (await session.execute(detected_completion_stmt)).all()
 
-    # already-paid chunks (keyed by day bucket from the payout, not detected_at)
+    # already-paid chunks keyed by the day they apply to (the payout day bucket,
+    # not paid_at — a payout recorded now can cover days inside the range)
     paid_stmt = (select(PayoutRecord)).where(
-        PayoutRecord.paid_at >= starts_at,
-        PayoutRecord.paid_at <= ends_at,
+        PayoutRecord.day >= day_bucket(starts_at),
+        PayoutRecord.day <= day_bucket(ends_at),
     )
     if member_uuid:
         paid_stmt = paid_stmt.where(PayoutRecord.member_uuid == member_uuid)

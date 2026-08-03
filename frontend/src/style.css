@@ -239,6 +239,33 @@ body {
   font-size: 0.88rem;
 }
 
+.rewards-table {
+  table-layout: fixed;
+}
+
+.day-table {
+  table-layout: fixed;
+}
+
+.rewards-table col.col-name {
+  width: 11rem;
+}
+
+.rewards-table col.col-rank,
+.rewards-table col.col-pending {
+  width: 4.5rem;
+}
+
+.rewards-table col.col-action,
+.day-table col.col-day {
+  width: 8rem;
+}
+
+.rewards-table col.col-raid,
+.day-table col.col-raid {
+  width: auto;
+}
+
 .raid-table thead {
   border-bottom: 1px solid var(--border);
 }

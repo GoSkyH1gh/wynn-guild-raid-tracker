@@ -386,7 +386,14 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
     return;
   }
 
-  let html = `<div class="table-wrap"><table class="raid-table">
+  let html = `<div class="table-wrap"><table class="raid-table rewards-table">
+    <colgroup>
+      <col class="col-name">
+      <col class="col-rank">
+      ${RAID_TYPES.map(() => `<col class="col-raid">`).join("")}
+      <col class="col-pending">
+      <col class="col-action">
+    </colgroup>
     <thead>
       <tr>
         <th class="col-member">Player</th>
@@ -453,6 +460,17 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
   );
 }
 
+function capCellHtml(p: { detected: number; payable: number; cap: number | null; pending?: number }): string {
+  const over = p.cap !== null && p.detected > p.payable;
+  const overCount = p.detected - p.payable;
+  const pending = p.pending;
+  return `<td class="overview-cell${over ? " over-limit-cell" : ""}">
+    <span class="cell-payable">${p.payable}</span>
+    ${over ? `<span class="over-limit-badge">${overCount} over</span>` : ""}
+    ${pending ? `<span class="cell-pending"> · ${pending} pending</span>` : ""}
+  </td>`;
+}
+
 function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
   const first = rows[0]!;
   const eligible = first.is_eligible;
@@ -470,11 +488,7 @@ function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
       if (!eligible) {
         return `<td class="overview-cell"><span class="cell-payable">${row.detected}</span></td>`;
       }
-      const over = row.daily_cap !== null && row.detected > row.payable;
-      return `<td class="overview-cell${over ? " over-limit-cell" : ""}">
-        <span class="cell-payable">${row.payable}</span>
-        ${over ? `<span class="over-limit-badge">+${row.detected - row.payable} over</span>` : ""}
-      </td>`;
+      return capCellHtml({ detected: row.detected, payable: row.payable, cap: row.daily_cap });
     }).join("")}
     <td><span class="total-runes">${pending}</span></td>
     <td class="col-action">
@@ -520,6 +534,10 @@ function renderDayBreakdown(uuid: string): string {
     <span class="legend-item"><span class="legend-swatch" style="background: color-mix(in srgb, var(--rune-tcc) 22%, transparent)"></span> over daily cap</span>
   </div>
   <div class="table-wrap"><table class="raid-table day-table">
+    <colgroup>
+      <col class="col-day">
+      ${RAID_TYPES.map(() => `<col class="col-raid">`).join("")}
+    </colgroup>
     <thead>
       <tr>
         <th class="col-member">Day</th>
@@ -545,12 +563,7 @@ function renderDayBreakdown(uuid: string): string {
         html += `<td class="overview-cell"><span class="cell-payable">${e.detected}</span></td>`;
         continue;
       }
-      const over = e.daily_cap !== null && e.detected > e.payable;
-      html += `<td class="overview-cell${over ? " over-limit-cell" : ""}">
-        <span class="cell-payable">${e.payable}</span>
-        ${over ? `<span class="over-limit-badge">${e.detected - e.payable}</span>` : ""}
-        ${e.pending > 0 ? `<span class="cell-pending"> · ${e.pending}</span>` : ""}
-      </td>`;
+      html += capCellHtml({ detected: e.detected, payable: e.payable, cap: e.daily_cap, pending: e.pending });
     }
     html += `</tr>`;
   }
