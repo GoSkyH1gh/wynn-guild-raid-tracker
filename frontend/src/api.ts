@@ -11,10 +11,7 @@ export interface RewardDefinition {
   id: number;
   raid_type: string;
   display_name: string;
-  reward_amount: number;
-  reward_label: string;
   daily_cap: number | null;
-  is_active: boolean;
   sort_order: number;
 }
 
@@ -65,7 +62,6 @@ export interface PayoutRecord {
   raid_type: string;
   day: string;
   count_paid: number;
-  reward_amount: number;
   paid_at: string;
   paid_by_discord_id: string | null;
   paid_by_username: string | null;

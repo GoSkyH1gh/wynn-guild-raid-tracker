@@ -43,19 +43,13 @@ class RewardDefinitionOut(BaseModel):
     id: int
     raid_type: str
     display_name: str
-    reward_amount: int
-    reward_label: str
     daily_cap: int | None
-    is_active: bool
     sort_order: int
 
 
 class RewardDefinitionUpdate(BaseModel):
-    reward_amount: int | None = None
-    reward_label: str | None = None
     display_name: str | None = None
     daily_cap: int | None = None
-    is_active: bool | None = None
 
 
 class DetectedCompletionOut(BaseModel):
@@ -134,7 +128,6 @@ class PayoutRecordOut(BaseModel):
     raid_type: str
     day: str
     count_paid: int
-    reward_amount: int
     paid_at: datetime
     paid_by_discord_id: str | None
     paid_by_username: str | None

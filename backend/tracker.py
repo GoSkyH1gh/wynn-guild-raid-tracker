@@ -479,7 +479,6 @@ async def process_payout(
                 raid_type=raid_type,
                 day=day,
                 count_paid=take,
-                reward_amount=take,
                 paid_by_discord_id=paid_by_discord_id,
                 paid_by_username=paid_by_username,
             )
@@ -517,7 +516,6 @@ async def list_payouts(
             "raid_type": p.raid_type,
             "day": p.day.isoformat(),
             "count_paid": p.count_paid,
-            "reward_amount": p.reward_amount,
             "paid_at": p.paid_at,
             "paid_by_discord_id": p.paid_by_discord_id,
             "paid_by_username": p.paid_by_username,

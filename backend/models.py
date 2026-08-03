@@ -52,10 +52,7 @@ class RewardDefinition(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     raid_type: Mapped[str] = mapped_column(String(10), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(64), nullable=False)
-    reward_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    reward_label: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     daily_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
@@ -108,7 +105,6 @@ class PayoutRecord(Base):
     raid_type: Mapped[str] = mapped_column(String(10), nullable=False)
     day: Mapped[date] = mapped_column(Date, nullable=False)
     count_paid: Mapped[int] = mapped_column(Integer, nullable=False)
-    reward_amount: Mapped[int] = mapped_column(Integer, nullable=False)
     paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     paid_by_discord_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     paid_by_username: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -85,10 +85,7 @@ async def _seed_reward_definitions():
                     RewardDefinition(
                         raid_type=rt["name"],
                         display_name=rt["display"],
-                        reward_amount=1,
-                        reward_label="",
                         sort_order=i,
-                        is_active=True,
                         daily_cap=rt["cap"],
                     )
                 )
@@ -96,12 +93,9 @@ async def _seed_reward_definitions():
                 definition.daily_cap is None
                 or not definition.display_name
                 or definition.display_name == "string"
-                or definition.reward_label == "string"
             ):
                 definition.daily_cap = rt["cap"]
                 definition.display_name = rt["display"]
-                definition.reward_amount = 1
-                definition.reward_label = ""
         await session.commit()
 
 
