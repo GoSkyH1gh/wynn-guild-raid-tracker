@@ -1,9 +1,12 @@
 import {
-  fetchPendingRewards,
-  fetchPayouts,
+  fetchRewardSummary,
+  fetchRewardPerDay,
+  fetchPayoutRecords,
   fetchServerStatus,
+  fetchRewardDefinitions,
+  updateRewardDefinition,
   createPayout,
-  voidPayout,
+  voidPayoutRecord,
   fetchDiscordLoginUrl,
   fetchCurrentUser,
   triggerFetch,
@@ -11,21 +14,25 @@ import {
   clearToken,
   getToken,
   isAuthenticated,
-  type PendingRewardItem,
-  type PayoutEvent,
+  type RewardSummary,
+  type RewardDay,
+  type RewardDayEntry,
+  type PayoutRecord,
   type ServerStatus,
   type CurrentUser,
+  type RewardDefinition,
   RAID_RUNES,
 } from "./api.js";
 
-type View = "pending" | "history" | "status";
+type View = "rewards" | "payouts" | "status" | "settings";
 type Range = "7d" | "14d" | "30d" | "all" | "custom";
 
 const RAID_TYPES = ["notg", "nol", "tcc", "tna", "wtp"];
 const VIEW_LABELS: Record<View, string> = {
-  pending: "Pending Rewards",
-  history: "Payout History",
+  rewards: "Rewards",
+  payouts: "Payouts",
   status: "Status",
+  settings: "Settings",
 };
 
 const hashParams = new URLSearchParams(location.hash.slice(1));
@@ -44,7 +51,7 @@ if (errorParam === "unauthorized") {
   history.replaceState(null, "", url.href);
 }
 
-let currentView: View = (params.get("view") as View) ?? "pending";
+let currentView: View = (params.get("view") as View) ?? "rewards";
 let currentRange: Range = (params.get("range") as Range) ?? "7d";
 
 function isoDate(d: Date): string {
@@ -74,17 +81,22 @@ function escapeHtml(s: string): string {
 const _now = new Date();
 const _defaultFrom = new Date(_now);
 _defaultFrom.setDate(_defaultFrom.getDate() - 7);
-let customFrom = params.get("from") ?? isoDate(_defaultFrom);
-let customTo = params.get("to") ?? isoDate(_now);
-let pendingData: PendingRewardItem[] | null = null;
-let payoutsData: PayoutEvent[] | null = null;
+let customFrom = params.get("from") ?? params.get("custom-from") ?? isoDate(_defaultFrom);
+let customTo = params.get("to") ?? params.get("custom-to") ?? isoDate(_now);
+let summaryData: RewardSummary[] | null = null;
+let perDayData: RewardDay[] | null = null;
+let payoutsData: PayoutRecord[] | null = null;
 let statusData: ServerStatus | null = null;
+let rewardDefs: RewardDefinition[] | null = null;
 let isFetching = false;
 let fetchError: string | null = null;
-let selected: Set<string> = new Set();
-let animateRows = true;
-let confirmingPayoutId: number | null = null;
-let expandedPayoutId: number | null = null;
+let expandedMember: string | null = null;
+let perDayCache = new Map<string, RewardDay[] | null>();
+let perDayLoading = new Set<string>();
+let voidingPayoutId: number | null = null;
+let payingMember: string | null = null;
+let confirmingVoidId: number | null = null;
+let savingDefId: number | null = null;
 let currentUser: CurrentUser | null = null;
 
 function now(): Date {
@@ -117,6 +129,11 @@ function fmtDate(iso: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function fmtDay(day: string): string {
+  const d = new Date(`${day}T00:00:00`);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 function fmtDuration(seconds: number): string {
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
   const m = Math.floor(seconds / 60);
@@ -134,36 +151,8 @@ function fmtAgo(iso: string): string {
   return rem > 0 ? `${hrs}h ${rem}m ago` : `${hrs}h ago`;
 }
 
-function groupByMember(items: PendingRewardItem[] | null): Map<string, { username: string; raids: Record<string, number> }> {
-  const map = new Map<string, { username: string; raids: Record<string, number> }>();
-  if (!items) return map;
-  for (const item of items) {
-    const key = item.member_uuid;
-    if (!map.has(key)) {
-      map.set(key, { username: item.username, raids: {} });
-    }
-    const entry = map.get(key)!;
-    entry.raids[item.raid_type] = (entry.raids[item.raid_type] ?? 0) + item.count_pending;
-  }
-  return map;
-}
-
-function totalRunes(raids: Record<string, number>): number {
-  return Object.values(raids).reduce((a, b) => a + b, 0);
-}
-
-function selectionKey(uuid: string): string {
-  return uuid;
-}
-
-function isSelected(uuid: string): boolean {
-  return selected.has(selectionKey(uuid));
-}
-
-function toggleSelect(uuid: string) {
-  const k = selectionKey(uuid);
-  if (selected.has(k)) selected.delete(k);
-  else selected.add(k);
+function capFor(raidType: string): number | null {
+  return rewardDefs?.find((d) => d.raid_type === raidType)?.daily_cap ?? null;
 }
 
 const $app = document.getElementById("app")!;
@@ -205,12 +194,12 @@ function render() {
         <h1 class="title">Guild Raid&nbsp;Tracker</h1>
         ${userHtml}
       </div>
-      <p class="subtitle">Track completions &amp; payout runes</p>
+      <p class="subtitle">Per-day completions · capped rune payouts</p>
     </header>
 
     <main class="main">
       <div class="controls">
-        <div class="view-toggle">${viewBtnHtml("pending")}${viewBtnHtml("history")}${viewBtnHtml("status")}</div>
+        <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("payouts")}${viewBtnHtml("status")}${currentUser?.is_admin ? viewBtnHtml("settings") : ""}</div>
         ${showRange
           ? `<div class="range-group">${rangeBtnHtml("7d", "7 days")}${rangeBtnHtml("14d", "14 days")}${rangeBtnHtml("30d", "30 days")}${rangeBtnHtml("all", "All time")}${rangeBtnHtml("custom", "Custom")}</div>
              ${currentRange === "custom"
@@ -253,9 +242,8 @@ function render() {
   document.querySelectorAll(".view-btn").forEach((btn) =>
     btn.addEventListener("click", () => {
       currentView = (btn as HTMLElement).dataset.view as View;
-      selected.clear();
-      confirmingPayoutId = null;
-      animateRows = true;
+      expandedMember = null;
+      confirmingVoidId = null;
       const url = new URL(location.href);
       url.searchParams.set("view", currentView);
       history.replaceState(null, "", url.href);
@@ -267,11 +255,12 @@ function render() {
   document.querySelectorAll(".range-btn").forEach((btn) =>
     btn.addEventListener("click", () => {
       currentRange = (btn as HTMLElement).dataset.range as Range;
-      selected.clear();
-      animateRows = true;
+      expandedMember = null;
       const url = new URL(location.href);
       url.searchParams.set("range", currentRange);
       if (currentRange !== "custom") {
+        url.searchParams.delete("custom-from");
+        url.searchParams.delete("custom-to");
         url.searchParams.delete("from");
         url.searchParams.delete("to");
       }
@@ -292,12 +281,11 @@ function render() {
     customFrom = $from.value;
     customTo = $to.value;
     currentRange = "custom";
-    selected.clear();
-    animateRows = true;
+    expandedMember = null;
     const url = new URL(location.href);
     url.searchParams.set("range", "custom");
-    url.searchParams.set("from", customFrom);
-    url.searchParams.set("to", customTo);
+    url.searchParams.set("custom-from", customFrom);
+    url.searchParams.set("custom-to", customTo);
     history.replaceState(null, "", url.href);
     render();
     fetchData();
@@ -309,10 +297,12 @@ function render() {
   const $contentEl = document.getElementById("content")!;
   const $statusBarEl = document.getElementById("status-bar")!;
 
-  if (currentView === "pending") {
-    renderPending($contentEl, $statusBarEl, from, to);
-  } else if (currentView === "history") {
-    renderHistory($contentEl, $statusBarEl);
+  if (currentView === "rewards") {
+    renderRewards($contentEl, $statusBarEl);
+  } else if (currentView === "payouts") {
+    renderPayouts($contentEl, $statusBarEl);
+  } else if (currentView === "settings") {
+    renderSettings($contentEl, $statusBarEl);
   } else {
     renderStatus($contentEl, $statusBarEl);
   }
@@ -326,7 +316,7 @@ function renderLogin() {
       <div class="login-card">
         <h1 class="login-title">Guild Raid&nbsp;Tracker</h1>
         <p class="login-desc">Sign in with Discord to continue</p>
-        ${wasDenied ? `<p class="login-error">Your Discord account is not authorized. Ask an admin to add you.</p>` : ""}
+        ${wasDenied ? `<p class="login-error">Your Discord account is not authorized. Ask an admin to add them.</p>` : ""}
         <button class="btn-discord" id="login-btn">Login with Discord</button>
       </div>
     </div>
@@ -351,299 +341,424 @@ function renderLogin() {
   });
 }
 
-// ── Pending view ───────────────────────────────────────────────
+// ── Rewards view ───────────────────────────────────────────────
 
-function renderPending($el: HTMLElement, $status: HTMLElement, from: Date, to: Date) {
+function renderRewards($el: HTMLElement, $status: HTMLElement) {
+  const { from, to } = rangeFrom(currentRange);
+
   if (isFetching) {
     $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
-    $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading pending rewards…</p></div>`;
+    $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading rewards…</p></div>`;
     return;
   }
 
-  if (pendingData === null) {
+  if (summaryData === null) {
     if (fetchError) {
       $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
-      $el.innerHTML = `<div class="error-state"><p>Failed to load pending rewards</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
+      $el.innerHTML = `<div class="error-state"><p>Failed to load rewards</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
       document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
       return;
     }
+    $el.innerHTML = `<div class="empty"><p>No data in this period.</p></div>`;
+    return;
   }
 
-  const byMember = groupByMember(pendingData);
-  const members = Array.from(byMember.entries());
-  const totalSelected = Array.from(selected).length;
-  const totalPending = pendingData ? pendingData.reduce((s, i) => s + i.count_pending, 0) : 0;
+  const byMember = new Map<string, RewardSummary[]>();
+  for (const item of summaryData) {
+    const list = byMember.get(item.member_uuid);
+    if (list) list.push(item);
+    else byMember.set(item.member_uuid, [item]);
+  }
+  const eligibleMembers: Array<[string, RewardSummary[]]> = [];
+  const ineligibleMembers: Array<[string, RewardSummary[]]> = [];
+  for (const entry of byMember.entries()) {
+    if (entry[1][0]!.is_eligible) eligibleMembers.push(entry);
+    else ineligibleMembers.push(entry);
+  }
+  const totalOf = (rows: RewardSummary[]) => rows.reduce((s, r) => s + r.pending, 0);
+  eligibleMembers.sort((a, b) => totalOf(b[1]) - totalOf(a[1]));
+  ineligibleMembers.sort((a, b) => totalOf(b[1]) - totalOf(a[1]));
+  const members = eligibleMembers.concat(ineligibleMembers);
+  const totalPending = eligibleMembers.reduce((s, entry) => s + totalOf(entry[1]), 0);
 
   $status.innerHTML = `
     <span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>
-    <span class="status-summary">${members.length} members · ${totalPending} pending runs</span>
+    <span class="status-summary">${members.length} players · ${totalPending} runs pending</span>
   `;
 
   if (members.length === 0) {
-    $el.innerHTML = `<div class="empty"><p>No pending rewards in this period.</p></div>`;
+    $el.innerHTML = `<div class="empty"><p>No completions in this period.</p></div>`;
     return;
   }
 
-  const allSelected = members.every(([uuid]) => isSelected(uuid));
-
-  let html = `
-    <div class="payout-bar">
-      <label class="select-all-label">
-        <input type="checkbox" id="select-all" ${allSelected ? "checked" : ""}>
-        Select all
-      </label>
-      <button id="payout-btn" class="btn-payout" ${totalSelected === 0 ? "disabled" : ""}>
-        Pay out selected (${totalSelected})
-      </button>
-    </div>
-    <div class="table-wrap">
-    <table class="raid-table">
-      <thead>
-        <tr>
-          <th class="col-check"></th>
-          <th class="col-member">Member</th>
-          ${RAID_TYPES.map((rt) => {
-            const info = RAID_RUNES[rt]!;
-            return `<th>${info.rune}<span class="rune-label">${rt}</span></th>`;
-          }).join("")}
-          <th>Total Runes</th>
-        </tr>
-      </thead>
-      <tbody>
-  `;
-
-  for (const [i, [uuid, entry]] of members.entries()) {
-    const sel = isSelected(uuid);
-    const anim = animateRows
-      ? `style="animation: row-in 0.25s ease both; animation-delay: ${i * 0.03}s"`
-      : "";
-    html += `
-      <tr class="member-row${sel ? " selected" : ""}" data-uuid="${escapeHtml(uuid)}" tabindex="0" ${anim}>
-        <td class="col-check"><input type="checkbox" class="row-check" ${sel ? "checked" : ""} data-uuid="${escapeHtml(uuid)}" aria-label="Select ${escapeHtml(entry.username)}"></td>
-        <td class="col-member"><span class="member-name">${escapeHtml(entry.username)}</span></td>
-        ${RAID_TYPES.map((rt) => {
-          const count = entry.raids[rt] ?? 0;
-          const info = RAID_RUNES[rt]!;
-          return count > 0
-            ? `<td><span class="raid-count">${count}</span> ${runeTag(info.rune, info.color)}</td>`
-            : `<td><span class="raid-count">—</span></td>`;
-        }).join("")}
-        <td><span class="total-runes">${totalRunes(entry.raids)}</span></td>
-      </tr>
-    `;
-  }
-
-  html += `</tbody></table></div>`;
-  $el.innerHTML = html;
-  animateRows = false;
-
-  document.querySelectorAll(".row-check").forEach((cb) =>
-    cb.addEventListener("change", (e) => {
-      const uuid = (e.currentTarget as HTMLElement).dataset.uuid!;
-      toggleSelect(uuid);
-      renderPending($el, $status, from, to);
-    })
-  );
-
-  const $payoutBtn = document.getElementById("payout-btn") as HTMLButtonElement | null;
-  if ($payoutBtn) {
-    $payoutBtn.addEventListener("click", handlePayout);
-  }
-
-  const $selectAllCb = document.getElementById("select-all") as HTMLInputElement | null;
-  if ($selectAllCb) {
-    $selectAllCb.addEventListener("change", (e) => {
-      const checked = (e.currentTarget as HTMLInputElement).checked;
-      if (checked) {
-        for (const [uuid] of members) selected.add(selectionKey(uuid));
-      } else {
-        selected.clear();
-      }
-      renderPending($el, $status, from, to);
-    });
-  }
-
-  document.querySelectorAll(".member-row").forEach((row) => {
-    const toggleRow = () => {
-      const uuid = (row as HTMLElement).dataset.uuid!;
-      toggleSelect(uuid);
-      renderPending($el, $status, from, to);
-    };
-
-    row.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest("input[type=checkbox]")) return;
-      toggleRow();
-    });
-
-    row.addEventListener("keydown", (e) => {
-      const ke = e as KeyboardEvent;
-      if (ke.key === "Enter" || ke.key === " ") {
-        e.preventDefault();
-        toggleRow();
-      }
-    });
-  });
-}
-
-// ── History view ───────────────────────────────────────────────
-
-function renderHistory($el: HTMLElement, $status: HTMLElement) {
-  if (isFetching) {
-    $status.innerHTML = `<span class="status-info">Payout history</span>`;
-    $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading payout history…</p></div>`;
-    return;
-  }
-
-  if (payoutsData === null) {
-    if (fetchError) {
-      $status.innerHTML = `<span class="status-info">Payout history</span>`;
-      $el.innerHTML = `<div class="error-state"><p>Failed to load payout history</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
-      document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
-      return;
-    }
-  }
-
-  $status.innerHTML = `<span class="status-info">Payout history</span>`;
-
-  if (!payoutsData || payoutsData.length === 0) {
-    $el.innerHTML = `<div class="empty"><p>No payouts recorded yet.</p></div>`;
-    return;
-  }
-
-  let html = `<div class="table-wrap"><table class="raid-table history-table">
+  let html = `<div class="table-wrap"><table class="raid-table rewards-table">
+    <colgroup>
+      <col class="col-name">
+      <col class="col-rank">
+      ${RAID_TYPES.map(() => `<col class="col-raid">`).join("")}
+      <col class="col-pending">
+      <col class="col-action">
+    </colgroup>
     <thead>
       <tr>
-        <th>Date</th>
+        <th class="col-member">Player</th>
+        <th>Rank</th>
         ${RAID_TYPES.map((rt) => {
           const info = RAID_RUNES[rt]!;
-          return `<th>${info.rune}<span class="rune-label">${rt}</span></th>`;
+          const cap = capFor(rt);
+          return `<th>${info.rune}<span class="rune-label">${rt}${cap !== null ? ` · cap ${cap}` : ""}</span></th>`;
         }).join("")}
-        <th>Total</th>
-        <th>Members</th>
-        <th>Paid by</th>
-        <th class="col-status">Status</th>
+        <th>Pending</th>
+        <th class="col-action"></th>
       </tr>
     </thead>
     <tbody>
   `;
 
-  for (const payout of payoutsData) {
-    const isVoided = payout.status === "voided";
-    const isExpanded = expandedPayoutId === payout.id;
+  for (const [uuid, rows] of eligibleMembers) {
+    html += memberRowHtml(uuid, rows);
+  }
 
-    const byMember = new Map<string, { username: string; raids: Record<string, number> }>();
-    for (const item of payout.items) {
-      if (!byMember.has(item.member_uuid)) {
-        byMember.set(item.member_uuid, { username: item.member_username ?? item.member_uuid, raids: {} });
-      }
-      const entry = byMember.get(item.member_uuid)!;
-      entry.raids[item.raid_type] = (entry.raids[item.raid_type] ?? 0) + item.count_paid;
-    }
-
-    const runeTotals: Record<string, number> = {};
-    for (const rt of RAID_TYPES) {
-      runeTotals[rt] = Array.from(byMember.values()).reduce((s, e) => s + (e.raids[rt] ?? 0), 0);
-    }
-
-    const isConfirming = confirmingPayoutId === payout.id;
-    const statusHtml = isVoided
-      ? `<span class="tag-voided">Voided</span>`
-      : currentUser?.is_admin
-        ? isConfirming
-          ? `<button class="btn-void btn-void-confirm" data-payout-id="${payout.id}">Confirm void?</button>`
-          : `<button class="btn-void" data-payout-id="${payout.id}">Void</button>`
-        : `<span class="text-completed">Completed</span>`;
-
-    html += `<tr class="payout-summary${isVoided ? " row-voided" : ""}${isExpanded ? " expanded" : ""}" data-payout-id="${payout.id}" tabindex="0" aria-expanded="${isExpanded}">
-      <td><span class="chevron" aria-hidden="true">${isExpanded ? "▾" : "▸"}</span>${fmtDate(payout.created_at)}${payout.label ? `<span class="payout-label">${escapeHtml(payout.label)}</span>` : ""}</td>
-      ${RAID_TYPES.map((rt) => {
-        const count = runeTotals[rt] ?? 0;
-        return `<td class="rune-cell">${count > 0 ? count : "—"}</td>`;
-      }).join("")}
-      <td><span class="total-runes">${totalRunes(runeTotals)}</span></td>
-      <td>${byMember.size}</td>
-      <td>${escapeHtml(payout.paid_by_username ?? "—")}</td>
-      <td class="col-status">${statusHtml}</td>
-    </tr>`;
-
-    if (isExpanded) {
-      html += `<tr class="payout-detail${isVoided ? " row-voided" : ""}"><td colspan="10">
-        <table class="raid-table detail-table">
-          <thead>
-            <tr>
-              <th class="col-member">Member</th>
-              ${RAID_TYPES.map((rt) => {
-                const info = RAID_RUNES[rt]!;
-                return `<th>${info.rune}<span class="rune-label">${rt}</span></th>`;
-              }).join("")}
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-          ${Array.from(byMember.entries())
-            .map(([uuid, entry]) => {
-              const safeName = escapeHtml(entry.username);
-              const memberName = safeName.length > 24 ? `${safeName.slice(0, 24)}…` : safeName;
-              return `<tr>
-                <td class="col-member"><span class="member-name" title="${safeName}">${memberName}</span></td>
-                ${RAID_TYPES.map((rt) => {
-                  const count = entry.raids[rt] ?? 0;
-                  return `<td>${count > 0 ? count : "—"}</td>`;
-                }).join("")}
-                <td><span class="total-runes">${totalRunes(entry.raids)}</span></td>
-              </tr>`;
-            })
-            .join("")}
-          </tbody>
-        </table>
+  if (ineligibleMembers.length > 0) {
+    html += `<tr class="section-row"><td colspan="${RAID_TYPES.length + 4}">
+        <span class="section-label">No payouts (view-only)</span>
       </td></tr>`;
+    for (const [uuid, rows] of ineligibleMembers) {
+      html += memberRowHtml(uuid, rows);
     }
+  }
+
+  const raidPending = RAID_TYPES.map((rt) =>
+    eligibleMembers.reduce(
+      (s, [, rows]) => s + (rows.find((r) => r.raid_type === rt)?.pending ?? 0),
+      0,
+    ),
+  );
+
+  html += `</tbody>
+    <tfoot>
+      <tr class="summary-row">
+        <td class="col-member summary-label">Totals</td>
+        <td></td>
+        ${raidPending.map((n) => `<td class="overview-cell summary-cell">${n}</td>`).join("")}
+        <td class="summary-total">${totalPending}</td>
+        <td class="col-action"></td>
+      </tr>
+    </tfoot>
+  </table></div>`;
+  $el.innerHTML = html;
+
+  document.querySelectorAll(".member-row").forEach((row) => {
+    const toggle = () => {
+      const uuid = (row as HTMLElement).dataset.member!;
+      if (expandedMember === uuid) {
+        expandedMember = null;
+        renderRewards($el, $status);
+      } else {
+        expandedMember = uuid;
+        renderRewards($el, $status);
+        void loadPerDay(uuid);
+      }
+    };
+    row.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("[data-pay]")) return;
+      toggle();
+    });
+    row.addEventListener("keydown", (e) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key === "Enter" || ke.key === " ") {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  });
+
+  document.querySelectorAll(".btn-pay").forEach((btn) =>
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const uuid = (e.currentTarget as HTMLElement).dataset.pay!;
+      void payMember(uuid);
+    })
+  );
+}
+
+function capCellHtml(p: { detected: number; payable: number; cap: number | null; pending?: number }): string {
+  const over = p.cap !== null && p.detected > p.payable;
+  const overCount = p.detected - p.payable;
+  const pending = p.pending;
+  return `<td class="overview-cell${over ? " over-limit-cell" : ""}">
+    <span class="cell-payable">${p.payable}</span>
+    ${over ? `<span class="over-limit-badge">${overCount} over</span>` : ""}
+    ${pending ? `<span class="cell-pending"> · ${pending} pending</span>` : ""}
+  </td>`;
+}
+
+function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
+  const first = rows[0]!;
+  const eligible = first.is_eligible;
+  const byRaid = new Map<string, RewardSummary>(rows.map((r) => [r.raid_type, r]));
+  const pending = rows.reduce((s, r) => s + r.pending, 0);
+  const expanded = expandedMember === uuid;
+  const paying = payingMember === uuid;
+
+  let html = `<tr class="member-row ${expanded ? "selected" : ""}${eligible ? "" : " ineligible"}" data-member="${escapeHtml(uuid)}" tabindex="0">
+    <td class="col-member"><span class="member-name">${escapeHtml(first.username)}</span></td>
+    <td><span class="rank-tag${eligible ? "" : " no-payout"}">${escapeHtml(first.rank)}</span></td>
+    ${RAID_TYPES.map((rt) => {
+      const row = byRaid.get(rt);
+      if (!row) return `<td class="overview-cell">—</td>`;
+      if (!eligible) {
+        return `<td class="overview-cell"><span class="cell-payable">${row.detected}</span></td>`;
+      }
+      return capCellHtml({ detected: row.detected, payable: row.payable, cap: row.daily_cap });
+    }).join("")}
+    <td><span class="total-runes">${pending}</span></td>
+    <td class="col-action">
+      ${eligible && pending > 0
+        ? `<button class="btn-pay" data-pay="${escapeHtml(uuid)}" ${paying ? "disabled" : ""}>${paying ? "Paying…" : `Pay ${pending}`}</button>`
+        : `<span class="text-muted-cell">${eligible ? "—" : "no payout"}</span>`}
+    </td>
+  </tr>`;
+
+  if (expanded) {
+    html += `<tr class="payout-detail"><td colspan="${RAID_TYPES.length + 4}">
+      <div class="day-table-wrap">${renderDayBreakdown(uuid)}</div>
+    </td></tr>`;
+  }
+  return html;
+}
+
+function renderDayBreakdown(uuid: string): string {
+  if (perDayLoading.has(uuid)) {
+    return `<div class="loading-state"><div class="spinner"></div><p>Loading per-day details…</p></div>`;
+  }
+  const cached = perDayCache.get(uuid);
+  if (cached === undefined) {
+    return `<div class="loading-state"><div class="spinner"></div><p>Loading per-day…</p></div>`;
+  }
+  if (cached === null) {
+    return `<div class="empty"><p>No per-day data.</p></div>`;
+  }
+
+  const byDay = new Map<string, Map<string, RewardDayEntry>>();
+  const days: string[] = [];
+  for (const day of cached) {
+    days.push(day.day);
+    const perRaid = new Map<string, RewardDayEntry>();
+    for (const e of day.entries) {
+      if (e.member_uuid === uuid) perRaid.set(e.raid_type, e);
+    }
+    byDay.set(day.day, perRaid);
+  }
+  const visibleDays = constrainRangeDays(days);
+
+  let html = `<div class="legend">
+    <span class="legend-item"><span class="legend-swatch" style="background: color-mix(in srgb, var(--rune-tcc) 22%, transparent)"></span> over daily cap</span>
+  </div>
+  <div class="table-wrap"><table class="raid-table day-table">
+    <colgroup>
+      <col class="col-day">
+      ${RAID_TYPES.map(() => `<col class="col-raid">`).join("")}
+    </colgroup>
+    <thead>
+      <tr>
+        <th class="col-member">Day</th>
+        ${RAID_TYPES.map((rt) => {
+          const info = RAID_RUNES[rt]!;
+          return `<th>${info.rune}<span class="rune-label">${rt}</span></th>`;
+        }).join("")}
+      </tr>
+    </thead>
+    <tbody>
+  `;
+
+  for (const day of visibleDays) {
+    const perRaid = byDay.get(day);
+    html += `<tr><td class="col-member"><span class="member-name">${fmtDay(day)}</span></td>`;
+    for (const rt of RAID_TYPES) {
+      const e = perRaid?.get(rt);
+      if (!e) {
+        html += `<td>—</td>`;
+        continue;
+      }
+      if (!e.is_eligible) {
+        html += `<td class="overview-cell"><span class="cell-payable">${e.detected}</span></td>`;
+        continue;
+      }
+      html += capCellHtml({ detected: e.detected, payable: e.payable, cap: e.daily_cap, pending: e.pending });
+    }
+    html += `</tr>`;
+  }
+  html += `</tbody></table></div>`;
+  return html;
+}
+
+function constrainRangeDays(days: string[]): string[] {
+  const sorted = [...days].sort();
+  const max = 14;
+  if (sorted.length <= max) return sorted;
+  return sorted.slice(-max);
+}
+
+async function loadPerDay(uuid: string) {
+  if (perDayCache.has(uuid)) {
+    render();
+    return;
+  }
+  perDayLoading.add(uuid);
+  perDayCache.set(uuid, []);
+  render();
+
+  const { from, to } = rangeFrom(currentRange);
+  try {
+    const data = await fetchRewardPerDay(fmtISO(from), fmtISO(to), uuid);
+    perDayCache.set(uuid, data);
+  } catch (err) {
+    perDayCache.set(uuid, null);
+    const msg = err instanceof Error ? err.message : "error";
+    showToast(`Failed to load per-day details: ${msg}`);
+  }
+  perDayLoading.delete(uuid);
+  render();
+}
+
+async function payMember(uuid: string) {
+  const rows = (summaryData ?? []).filter((r) => r.member_uuid === uuid);
+  const items = rows
+    .filter((r) => r.pending > 0 && r.is_eligible)
+    .map((r) => ({ member_uuid: uuid, raid_type: r.raid_type, count: r.pending }));
+
+  if (items.length === 0) {
+    showToast("Nothing pending for this player");
+    return;
+  }
+
+  payingMember = uuid;
+  render();
+
+  const { from, to } = rangeFrom(currentRange);
+  try {
+    const result = await createPayout({ starts_at: fmtISO(from), ends_at: fmtISO(to), items });
+    const total = result.reduce((s, c) => s + c.count_paid, 0);
+    payingMember = null;
+    await fetchData();
+    showToast(`Paid out ${total} rune(s) across ${result.length} day chunk(s)`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    payingMember = null;
+    render();
+    showToast(`Payout failed: ${msg}`);
+  }
+}
+
+async function loadSummary() {
+  const { from, to } = rangeFrom(currentRange);
+  summaryData = await fetchRewardSummary(fmtISO(from), fmtISO(to));
+}
+
+// ── Payouts view ───────────────────────────────────────────────
+
+function voidActionHtml(p: PayoutRecord): string {
+  if (!currentUser?.is_admin) return `<span class="text-muted-cell">—</span>`;
+  if (voidingPayoutId === p.id) {
+    return `<button class="btn-pay btn-pay-busy" disabled><span class="btn-spinner"></span>Voiding…</button>`;
+  }
+  if (confirmingVoidId === p.id) {
+    return `<button class="btn-pay btn-pay-confirm" data-void="${p.id}">Confirm void?</button>`;
+  }
+  return `<button class="btn-pay" data-void="${p.id}">Void</button>`;
+}
+
+function renderPayouts($el: HTMLElement, $status: HTMLElement) {
+  $status.innerHTML = `<span class="status-info">Payout history</span>`;
+
+  if (isFetching) {
+    $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading payouts…</p></div>`;
+    return;
+  }
+
+  if (payoutsData === null) {
+    if (fetchError) {
+      $el.innerHTML = `<div class="error-state"><p>Failed to load payouts</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
+      document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
+      return;
+    }
+    $el.innerHTML = `<div class="empty"><p>No payouts recorded yet.</p></div>`;
+    return;
+  }
+
+  if (payoutsData.length === 0) {
+    $el.innerHTML = `<div class="empty"><p>No payouts recorded yet.</p></div>`;
+    return;
+  }
+
+  let html = `<div class="table-wrap"><table class="raid-table">
+    <thead>
+      <tr>
+        <th>Paid at</th>
+        <th class="col-member">Player</th>
+        <th>Raid</th>
+        <th>Day</th>
+        <th>Runes</th>
+        <th class="col-member">Paid by</th>
+        <th class="col-action"></th>
+      </tr>
+    </thead>
+    <tbody>
+  `;
+
+  for (const p of payoutsData) {
+    const info = RAID_RUNES[p.raid_type] ?? { rune: p.raid_type, color: "var(--text-muted)" };
+    html += `<tr class="${voidingPayoutId === p.id ? "voiding" : ""}">
+      <td>${fmtDate(p.paid_at)}</td>
+      <td class="col-member"><span class="member-name">${escapeHtml(p.member_username)}</span></td>
+      <td class="overview-cell">${runeTag(info.rune, info.color)}</td>
+      <td>${fmtDay(p.day)}</td>
+      <td>${p.count_paid}</td>
+      <td class="col-member">${p.paid_by_username ? escapeHtml(p.paid_by_username) : "—"}</td>
+      <td class="col-action">${voidActionHtml(p)}</td>
+    </tr>`;
   }
 
   html += `</tbody></table></div>`;
   $el.innerHTML = html;
 
-  document.querySelectorAll(".payout-summary").forEach((row) => {
-    const toggle = (e?: Event) => {
-      if (e && (e.target as HTMLElement).closest(".btn-void")) return;
-      const payoutId = Number((row as HTMLElement).dataset.payoutId);
-      expandedPayoutId = expandedPayoutId === payoutId ? null : payoutId;
-      renderHistory($el, $status);
-    };
-    row.addEventListener("click", toggle);
-    row.addEventListener("keydown", (e) => {
-      const ke = e as KeyboardEvent;
-      if (ke.key !== "Enter" && ke.key !== " ") return;
-      ke.preventDefault();
-      toggle(e);
+  document.querySelectorAll("[data-void]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = Number((e.currentTarget as HTMLElement).dataset.void);
+      if (confirmingVoidId === id) {
+        confirmingVoidId = null;
+        void handleVoid(id);
+      } else {
+        confirmingVoidId = id;
+        renderPayouts($el, $status);
+      }
     });
   });
+}
 
-  document.querySelectorAll(".btn-void").forEach((btn) =>
-    btn.addEventListener("click", (e) => {
-      const payoutId = Number((e.currentTarget as HTMLElement).dataset.payoutId);
-      e.stopPropagation();
-      if (confirmingPayoutId === payoutId) {
-        confirmingPayoutId = null;
-        const $confirmBtn = e.currentTarget as HTMLButtonElement;
-        $confirmBtn.disabled = true;
-        $confirmBtn.textContent = "Voiding…";
-        handleVoid(payoutId);
-      } else {
-        confirmingPayoutId = payoutId;
-        renderHistory($el, $status);
-      }
-    })
-  );
-  document.querySelectorAll(".btn-void-confirm").forEach((btn) =>
-    btn.addEventListener("keydown", (e) => {
-      const ke = e as KeyboardEvent;
-      if (ke.key === "Escape") {
-        confirmingPayoutId = null;
-        renderHistory($el, $status);
-      }
-    })
-  );
+async function handleVoid(payoutId: number) {
+  voidingPayoutId = payoutId;
+  confirmingVoidId = null;
+  render();
+  try {
+    await voidPayoutRecord(payoutId);
+    const { from, to } = rangeFrom(currentRange);
+    payoutsData = await fetchPayoutRecords();
+    if (currentView === "payouts") {
+      render();
+    } else {
+      summaryData = await fetchRewardSummary(fmtISO(from), fmtISO(to));
+      render();
+    }
+    showToast("Payout voided");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "error";
+    showToast(`Failed to void payout: ${msg}`);
+  }
+  voidingPayoutId = null;
+  render();
 }
 
 // ── Status view ────────────────────────────────────────────────
@@ -742,59 +857,74 @@ function renderStatus($el: HTMLElement, $status: HTMLElement) {
   document.getElementById("fetch-now-btn")?.addEventListener("click", handleFetchNow);
 }
 
-// ── Payout action ──────────────────────────────────────────────
+// ── Settings view ──────────────────────────────────────────────
 
-async function handlePayout() {
-  const byMember = groupByMember(pendingData);
-  const items: { member_uuid: string; raid_type: string; count: number }[] = [];
-  let totalCount = 0;
+function renderSettings($el: HTMLElement, $status: HTMLElement) {
+  $status.innerHTML = `<span class="status-info">Reward settings</span>`;
 
-  for (const [uuid, entry] of byMember) {
-    if (!isSelected(uuid)) continue;
-    for (const rt of RAID_TYPES) {
-      const count = entry.raids[rt] ?? 0;
-      if (count > 0) {
-        items.push({ member_uuid: uuid, raid_type: rt, count });
-        totalCount += count;
+  if (!currentUser?.is_admin) {
+    $el.innerHTML = `<div class="error-state"><p>Admin access required.</p></div>`;
+    return;
+  }
+
+  if (rewardDefs === null) {
+    $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading settings…</p></div>`;
+    return;
+  }
+
+  let html = `
+    <div class="settings-intro"><p>Daily caps per raid. Caps limit how many completions count toward a payout per member per day. Leave empty for unlimited.</p></div>
+    <div class="table-wrap"><table class="raid-table settings-table">
+      <thead>
+        <tr>
+          <th>Raid</th>
+          <th>Name</th>
+          <th>Daily cap</th>
+          <th class="col-action"></th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  for (const def of rewardDefs) {
+    const info = RAID_RUNES[def.raid_type];
+    const saving = savingDefId === def.id;
+    html += `<tr>
+      <td class="overview-cell">${info ? runeTag(info.rune, info.color) : escapeHtml(def.raid_type)}</td>
+      <td>${escapeHtml(def.display_name)}</td>
+      <td><input class="settings-input settings-cap" type="number" min="0" data-def="${def.id}" value="${def.daily_cap ?? ""}" placeholder="unlimited"></td>
+      <td class="col-action">
+        <button class="btn-pay settings-save" data-def="${def.id}" ${saving ? "disabled" : ""}>${saving ? "Saving…" : "Save"}</button>
+      </td>
+    </tr>`;
+  }
+
+  html += `</tbody></table></div>`;
+  $el.innerHTML = html;
+
+  document.querySelectorAll(".settings-save").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number((btn as HTMLElement).dataset.def);
+      const $cap = document.querySelector(`.settings-cap[data-def="${id}"]`) as HTMLInputElement | null;
+      if (!$cap) return;
+
+      const capRaw = $cap.value.trim();
+      const daily_cap = capRaw === "" ? null : Math.max(0, Math.floor(Number(capRaw) || 0));
+
+      savingDefId = id;
+      renderSettings($el, $status);
+      try {
+        await updateRewardDefinition(id, { daily_cap });
+        rewardDefs = await fetchRewardDefinitions();
+        showToast("Settings saved");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "error";
+        showToast(`Failed to save: ${msg}`);
       }
-    }
-  }
-
-  if (items.length === 0) return;
-
-  const { from, to } = rangeFrom(currentRange);
-  const label = `Payout ${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}`;
-
-  const $payoutBtn = document.getElementById("payout-btn") as HTMLButtonElement | null;
-  if ($payoutBtn) {
-    $payoutBtn.disabled = true;
-    $payoutBtn.textContent = "Paying out…";
-  }
-
-  try {
-    await createPayout({ label, starts_at: fmtISO(from), ends_at: fmtISO(to), items });
-    selected.clear();
-    await fetchData();
-    showToast(`Paid out ${totalCount} runes across ${items.length} line items`);
-  } catch (err) {
-    showToast(`Payout failed: ${err instanceof Error ? err.message : "Unknown error"}`);
-    if ($payoutBtn) {
-      $payoutBtn.disabled = false;
-      $payoutBtn.textContent = "Pay out selected";
-    }
-  }
-}
-
-// ── Void action ────────────────────────────────────────────────
-
-async function handleVoid(payoutId: number) {
-  try {
-    await voidPayout(payoutId);
-    await fetchData();
-    showToast("Payout voided");
-  } catch (err) {
-    showToast(`Failed to void payout: ${err instanceof Error ? err.message : "Unknown error"}`);
-  }
+      savingDefId = null;
+      renderSettings($el, $status);
+    });
+  });
 }
 
 // ── Fetch now action ───────────────────────────────────────────
@@ -817,7 +947,8 @@ async function handleFetchNow() {
     );
     render();
   } catch (err) {
-    showToast(`Fetch failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    showToast(`Fetch failed: ${msg}`);
     if ($btn) {
       $btn.disabled = false;
       $btn.textContent = "Fetch Now";
@@ -856,13 +987,14 @@ async function fetchData() {
   fetchError = null;
   render();
 
-  const { from, to } = rangeFrom(currentRange);
-
   try {
-    if (currentView === "pending") {
-      pendingData = await fetchPendingRewards(fmtISO(from), fmtISO(to));
+    if (rewardDefs === null) {
+      rewardDefs = await fetchRewardDefinitions();
     }
-    payoutsData = await fetchPayouts();
+    if (currentView === "rewards") {
+      await loadSummary();
+    }
+    payoutsData = await fetchPayoutRecords();
     statusData = await fetchServerStatus();
     fetchError = null;
   } catch (err) {
@@ -890,13 +1022,10 @@ async function init() {
   }
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && confirmingPayoutId !== null) {
-      confirmingPayoutId = null;
-      if (currentView === "history") {
-        const $el = document.getElementById("content")!;
-        const $statusBarEl = document.getElementById("status-bar")!;
-        renderHistory($el, $statusBarEl);
-      }
+    const ke = e as KeyboardEvent;
+    if (ke.key === "Escape" && confirmingVoidId !== null) {
+      confirmingVoidId = null;
+      render();
     }
   });
 

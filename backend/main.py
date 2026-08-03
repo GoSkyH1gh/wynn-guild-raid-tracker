@@ -5,11 +5,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv, find_dotenv
-from fastapi import FastAPI, HTTPException, Query, Depends, Response, Request
+from fastapi import FastAPI, HTTPException, Depends, Query, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, text as sa_text
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy import select
 
 from .auth import (
     AUTHORIZED_DISCORD_IDS,
@@ -27,19 +26,9 @@ from .auth import (
     revoke_user_token,
 )
 from .database import AsyncSessionLocal, engine, verify_database_connection
-from .models import (
-    Base,
-    DiscordUser,
-    FetchLog,
-    GuildMember,
-    RaidSnapshot,
-    RewardDefinition,
-    DetectedCompletion,
-    PayoutEvent,
-    PayoutItem,
-)
+from .models import Base, DiscordUser, FetchLog, GuildMember, RaidSnapshot, RewardDefinition, PayoutRecord
 from .schemas import (
-    CurrentUserOut,
+CurrentUserOut,
     DiscordUserOut,
     DiscordUserCreate,
     SetupRequest,
@@ -49,17 +38,23 @@ from .schemas import (
     RaidSnapshotOut,
     RewardDefinitionOut,
     RewardDefinitionUpdate,
-    PendingRewardItem,
-    PayoutEventOut,
-    PayoutItemOut,
+    RewardSummaryOut,
+    RewardDayOut,
     PayoutCreate,
-    PayoutResult,
+    PayoutChunkOut,
+    PayoutRecordOut,
     VoidPayoutResult,
     ServerStatus,
     TriggerResult,
-    MemberPayoutSummary,
 )
-from .tracker import _aggregate_pending, _record_fetch_log, process_payout, snapshot_guild
+from .tracker import (
+    get_reward_summary,
+    get_reward_per_day,
+    process_payout,
+    list_payouts,
+    _record_fetch_log,
+    snapshot_guild,
+)
 
 load_dotenv(find_dotenv())
 
@@ -70,11 +65,11 @@ FETCH_INTERVAL_SECONDS = 60 * 30
 _background_task: asyncio.Task | None = None
 
 DEFAULT_RAID_TYPES = [
-    {"name": "notg", "display": "Nest of the Grootslangs"},
-    {"name": "nol", "display": "Orphion's Nexus of Light"},
-    {"name": "tcc", "display": "The Canyon Colossus"},
-    {"name": "tna", "display": "The Nameless Anomaly"},
-    {"name": "wtp", "display": "The Wartorn Palace"},
+    {"name": "notg", "display": "Nest of the Grootslangs", "cap": 2},
+    {"name": "nol", "display": "Orphion's Nexus of Light", "cap": 6},
+    {"name": "tcc", "display": "The Canyon Colossus", "cap": 6},
+    {"name": "tna", "display": "The Nameless Anomaly", "cap": 6},
+    {"name": "wtp", "display": "The Wartorn Palace", "cap": 0},
 ]
 
 
@@ -84,17 +79,23 @@ async def _seed_reward_definitions():
             existing = await session.execute(
                 select(RewardDefinition).where(RewardDefinition.raid_type == rt["name"])
             )
-            if existing.scalar_one_or_none() is None:
+            definition = existing.scalar_one_or_none()
+            if definition is None:
                 session.add(
                     RewardDefinition(
                         raid_type=rt["name"],
                         display_name=rt["display"],
-                        reward_amount=0,
-                        reward_label="",
                         sort_order=i,
-                        is_active=True,
+                        daily_cap=rt["cap"],
                     )
                 )
+            elif (
+                definition.daily_cap is None
+                or not definition.display_name
+                or definition.display_name == "string"
+            ):
+                definition.daily_cap = rt["cap"]
+                definition.display_name = rt["display"]
         await session.commit()
 
 
@@ -137,39 +138,6 @@ async def lifespan(app: FastAPI):
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
-    async with AsyncSessionLocal() as session:
-        await session.execute(
-            sa_text(
-                "ALTER TABLE payout_events "
-                "ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'completed'"
-            )
-        )
-        await session.execute(
-            sa_text(
-                "ALTER TABLE payout_events "
-                "ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ"
-            )
-        )
-        await session.execute(
-            sa_text(
-                "ALTER TABLE payout_events "
-                "ADD COLUMN IF NOT EXISTS paid_by_discord_id VARCHAR(32)"
-            )
-        )
-        await session.execute(
-            sa_text(
-                "ALTER TABLE payout_events "
-                "ADD COLUMN IF NOT EXISTS paid_by_username VARCHAR(64)"
-            )
-        )
-        await session.execute(
-            sa_text(
-                "ALTER TABLE discord_users "
-                "ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0"
-            )
-        )
-        await session.commit()
 
     await _seed_reward_definitions()
 
@@ -516,116 +484,59 @@ async def update_reward_definition(
         return RewardDefinitionOut.model_validate(rd)
 
 
-@app.get("/api/rewards/pending", response_model=list[PendingRewardItem])
-async def get_pending_rewards(
+@app.get("/api/rewards/summary", response_model=list[RewardSummaryOut])
+async def get_rewards_summary(
     from_: datetime = Query(alias="from"),
     to: datetime = Query(alias="to"),
     member_uuid: str | None = None,
     current_user: dict = Depends(get_current_user),
 ):
     async with AsyncSessionLocal() as session:
-        return await _aggregate_pending(session, from_, to, member_uuid)
+        return await get_reward_summary(session, from_, to, member_uuid)
 
 
-@app.post("/api/rewards/payout", response_model=PayoutResult)
-async def create_payout(body: PayoutCreate, admin_user: dict = Depends(get_admin_user)):
-    if not body.items:
-        raise HTTPException(status_code=400, detail="Payout items list is empty")
-
-    payout_event_id, payout_label, item_count, created_at = await process_payout(
-        starts_at=body.starts_at,
-        ends_at=body.ends_at,
-        items=[item.model_dump() for item in body.items],
-        label=body.label,
-        paid_by_discord_id=admin_user["discord_id"],
-        paid_by_username=admin_user["username"],
-    )
-
-    return PayoutResult(
-        payout_event_id=payout_event_id,
-        label=payout_label,
-        item_count=item_count,
-        created_at=created_at,
-    )
-
-
-@app.get("/api/payouts", response_model=list[PayoutEventOut])
-async def list_payouts(current_user: dict = Depends(get_current_user)):
+@app.get("/api/rewards/per-day", response_model=list[RewardDayOut])
+async def get_rewards_per_day(
+    from_: datetime = Query(alias="from"),
+    to: datetime = Query(alias="to"),
+    member_uuid: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(PayoutEvent)
-            .options(selectinload(PayoutEvent.items).joinedload(PayoutItem.member))
-            .order_by(PayoutEvent.created_at.desc())
-        )
-        events = result.scalars().all()
-
-        return [PayoutEventOut.model_validate(event) for event in events]
+        return await get_reward_per_day(session, from_, to, member_uuid)
 
 
-@app.get("/api/payouts/{payout_id}", response_model=PayoutEventOut)
-async def get_payout(payout_id: int, current_user: dict = Depends(get_current_user)):
+@app.post("/api/rewards/payout", response_model=list[PayoutChunkOut])
+async def create_reward_payout(body: PayoutCreate, admin_user: dict = Depends(get_admin_user)):
     async with AsyncSessionLocal() as session:
-        event = await session.get(
-            PayoutEvent,
-            payout_id,
-            options=[selectinload(PayoutEvent.items).joinedload(PayoutItem.member)],
-        )
-        if event is None:
-            raise HTTPException(status_code=404, detail="Payout not found")
+        try:
+            return await process_payout(
+                session,
+                body.starts_at,
+                body.ends_at,
+                [item.model_dump() for item in body.items],
+                paid_by_discord_id=admin_user["discord_id"],
+                paid_by_username=admin_user["username"],
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
-        return PayoutEventOut.model_validate(event)
+
+@app.get("/api/payouts", response_model=list[PayoutRecordOut])
+async def get_payouts(current_user: dict = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        return await list_payouts(session)
 
 
 @app.post("/api/payouts/{payout_id}/void", response_model=VoidPayoutResult)
 async def void_payout(payout_id: int, admin_user: dict = Depends(get_admin_user)):
     async with AsyncSessionLocal() as session:
-        event = await session.get(PayoutEvent, payout_id)
-        if event is None:
-            raise HTTPException(status_code=404, detail="Payout not found")
-        if event.status == "voided":
-            raise HTTPException(status_code=409, detail="Payout is already voided")
-
-        event.status = "voided"
-        event.voided_at = datetime.now(timezone.utc)
+        record = await session.get(PayoutRecord, payout_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Payout record not found")
+        await session.delete(record)
         await session.commit()
-
-        return VoidPayoutResult(
-            payout_event_id=event.id,
-            status=event.status,
-            voided_at=event.voided_at,
-        )
-
-
-@app.get("/api/members/{uuid}/payouts", response_model=list[MemberPayoutSummary])
-async def get_member_payouts(uuid: str, current_user: dict = Depends(get_current_user)):
-    async with AsyncSessionLocal() as session:
-        member = await session.get(GuildMember, uuid)
-        if member is None:
-            raise HTTPException(status_code=404, detail="Member not found")
-
-        items_result = await session.execute(
-            select(PayoutItem)
-            .options(joinedload(PayoutItem.member))
-            .where(PayoutItem.member_uuid == uuid)
-            .order_by(PayoutItem.rewarded_at.desc())
-        )
-        all_items = items_result.scalars().all()
-
-        by_event: dict[int, dict] = {}
-        for item in all_items:
-            if item.payout_event_id not in by_event:
-                event = await session.get(PayoutEvent, item.payout_event_id)
-                by_event[item.payout_event_id] = {
-                    "payout_event_id": item.payout_event_id,
-                    "payout_label": event.label if event else None,
-                    "rewarded_at": item.rewarded_at,
-                    "items": [],
-                }
-            by_event[item.payout_event_id]["items"].append(
-                PayoutItemOut.model_validate(item)
-            )
-
-        return [MemberPayoutSummary(**v) for v in by_event.values()]
+        return VoidPayoutResult(payout_id=payout_id, status="voided")
 
 
 @app.get("/api/status", response_model=ServerStatus)

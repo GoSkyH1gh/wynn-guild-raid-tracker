@@ -7,49 +7,64 @@ export interface GuildMember {
   is_current_member: boolean;
 }
 
-export interface PendingRewardItem {
-  member_uuid: string;
-  username: string;
-  raid_type: string;
-  count_pending: number;
-  earliest_detected: string;
-  latest_detected: string;
-}
-
-export interface PayoutItem {
-  id: number;
-  payout_event_id: number;
-  detected_completion_id: number;
-  member_uuid: string;
-  member_username: string | null;
-  raid_type: string;
-  count_paid: number;
-  reward_amount: number;
-  rewarded_at: string;
-}
-
-export interface PayoutEvent {
-  id: number;
-  label: string | null;
-  starts_at: string;
-  ends_at: string;
-  created_at: string;
-  status: string;
-  voided_at: string | null;
-  paid_by_discord_id: string | null;
-  paid_by_username: string | null;
-  items: PayoutItem[];
-}
-
 export interface RewardDefinition {
   id: number;
   raid_type: string;
   display_name: string;
-  reward_amount: number;
-  reward_label: string;
   daily_cap: number | null;
-  is_active: boolean;
   sort_order: number;
+}
+
+export interface RewardSummary {
+  member_uuid: string;
+  username: string;
+  rank: string;
+  is_eligible: boolean;
+  raid_type: string;
+  days: number;
+  detected: number;
+  payable: number;
+  paid: number;
+  pending: number;
+  daily_cap: number | null;
+}
+
+export interface RewardDayEntry {
+  member_uuid: string;
+  username: string;
+  rank: string;
+  is_eligible: boolean;
+  raid_type: string;
+  daily_cap: number | null;
+  detected: number;
+  payable: number;
+  paid: number;
+  pending: number;
+  over_cap: number;
+}
+
+export interface RewardDay {
+  day: string;
+  entries: RewardDayEntry[];
+}
+
+export interface PayoutChunk {
+  day: string;
+  member_uuid: string;
+  raid_type: string;
+  count_paid: number;
+}
+
+export interface PayoutRecord {
+  id: number;
+  member_uuid: string;
+  member_username: string;
+  raid_type: string;
+  day: string;
+  count_paid: number;
+  paid_at: string;
+  paid_by_discord_id: string | null;
+  paid_by_username: string | null;
 }
 
 export const RAID_RUNES: Record<string, { rune: string; color: string }> = {
@@ -133,36 +148,59 @@ export async function fetchMembers(): Promise<GuildMember[]> {
   return fetchJson<GuildMember[]>("/api/members?current_only=true");
 }
 
-export async function fetchPendingRewards(
+export async function fetchRewardDefinitions(): Promise<RewardDefinition[]> {
+  return fetchJson<RewardDefinition[]>("/api/reward-definitions");
+}
+
+export async function updateRewardDefinition(
+  id: number,
+  patch: Partial<
+    Pick<RewardDefinition, "daily_cap" | "display_name">
+  >,
+): Promise<RewardDefinition> {
+  return fetchJson<RewardDefinition>(`/api/reward-definitions/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function fetchRewardSummary(
   from: string,
   to: string,
   member_uuid?: string,
-): Promise<PendingRewardItem[]> {
-  let url = `/api/rewards/pending?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+): Promise<RewardSummary[]> {
+  let url = `/api/rewards/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   if (member_uuid) url += `&member_uuid=${member_uuid}`;
-  return fetchJson<PendingRewardItem[]>(url);
+  return fetchJson<RewardSummary[]>(url);
 }
 
-export async function fetchPayouts(): Promise<PayoutEvent[]> {
-  return fetchJson<PayoutEvent[]>("/api/payouts");
+export async function fetchRewardPerDay(
+  from: string,
+  to: string,
+  member_uuid?: string,
+): Promise<RewardDay[]> {
+  let url = `/api/rewards/per-day?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  if (member_uuid) url += `&member_uuid=${member_uuid}`;
+  return fetchJson<RewardDay[]>(url);
 }
 
 export async function createPayout(body: {
-  label?: string | null;
   starts_at: string;
   ends_at: string;
   items: { member_uuid: string; raid_type: string; count: number }[];
-}): Promise<{ payout_event_id: number }> {
-  return fetchJson("/api/rewards/payout", {
+}): Promise<PayoutChunk[]> {
+  return fetchJson<PayoutChunk[]>("/api/rewards/payout", {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
-export async function voidPayout(payoutId: number): Promise<{ payout_event_id: number; status: string; voided_at: string }> {
-  return fetchJson(`/api/payouts/${payoutId}/void`, {
-    method: "POST",
-  });
+export async function fetchPayoutRecords(): Promise<PayoutRecord[]> {
+  return fetchJson<PayoutRecord[]>("/api/payouts");
+}
+
+export async function voidPayoutRecord(payoutId: number): Promise<{ payout_id: number; status: string }> {
+  return fetchJson(`/api/payouts/${payoutId}/void`, { method: "POST" });
 }
 
 export interface FetchLogEntry {

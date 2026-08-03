@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -24,7 +24,6 @@ class GuildMember(Base):
 
     snapshots: Mapped[list["RaidSnapshot"]] = relationship(back_populates="member", cascade="all, delete-orphan")
     completions: Mapped[list["DetectedCompletion"]] = relationship(back_populates="member", cascade="all, delete-orphan")
-    payout_items: Mapped[list["PayoutItem"]] = relationship(back_populates="member", cascade="all, delete-orphan")
 
 
 class RaidSnapshot(Base):
@@ -53,10 +52,7 @@ class RewardDefinition(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     raid_type: Mapped[str] = mapped_column(String(10), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(64), nullable=False)
-    reward_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    reward_label: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     daily_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
@@ -72,23 +68,6 @@ class DetectedCompletion(Base):
     end_snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("raid_snapshots.id"), nullable=True)
 
     member: Mapped["GuildMember"] = relationship(back_populates="completions")
-    payout_items: Mapped[list["PayoutItem"]] = relationship(back_populates="completion", cascade="all, delete-orphan")
-
-
-class PayoutEvent(Base):
-    __tablename__ = "payout_events"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    label: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    status: Mapped[str] = mapped_column(String(16), default="completed")
-    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    paid_by_discord_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    paid_by_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
-
-    items: Mapped[list["PayoutItem"]] = relationship(back_populates="event", cascade="all, delete-orphan")
 
 
 class DiscordUser(Base):
@@ -118,22 +97,14 @@ class FetchLog(Base):
     error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
 
-class PayoutItem(Base):
-    __tablename__ = "payout_items"
+class PayoutRecord(Base):
+    __tablename__ = "payout_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    payout_event_id: Mapped[int] = mapped_column(ForeignKey("payout_events.id"), nullable=False, index=True)
-    detected_completion_id: Mapped[int] = mapped_column(ForeignKey("detected_completions.id"), nullable=False, index=True)
     member_uuid: Mapped[str] = mapped_column(ForeignKey("guild_members.uuid"), nullable=False, index=True)
     raid_type: Mapped[str] = mapped_column(String(10), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
     count_paid: Mapped[int] = mapped_column(Integer, nullable=False)
-    reward_amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    rewarded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-
-    event: Mapped["PayoutEvent"] = relationship(back_populates="items")
-    completion: Mapped["DetectedCompletion"] = relationship(back_populates="payout_items")
-    member: Mapped["GuildMember"] = relationship(back_populates="payout_items")
-
-    @property
-    def member_username(self) -> str | None:
-        return self.member.username if self.member else None
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    paid_by_discord_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    paid_by_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
