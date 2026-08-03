@@ -423,7 +423,24 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
     }
   }
 
-  html += `</tbody></table></div>`;
+  const raidPending = RAID_TYPES.map((rt) =>
+    eligibleMembers.reduce(
+      (s, [, rows]) => s + (rows.find((r) => r.raid_type === rt)?.pending ?? 0),
+      0,
+    ),
+  );
+
+  html += `</tbody>
+    <tfoot>
+      <tr class="summary-row">
+        <td class="col-member summary-label">Totals</td>
+        <td></td>
+        ${raidPending.map((n) => `<td class="overview-cell summary-cell">${n}</td>`).join("")}
+        <td class="summary-total">${totalPending}</td>
+        <td class="col-action"></td>
+      </tr>
+    </tfoot>
+  </table></div>`;
   $el.innerHTML = html;
 
   document.querySelectorAll(".member-row").forEach((row) => {
