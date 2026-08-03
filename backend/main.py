@@ -92,8 +92,16 @@ async def _seed_reward_definitions():
                         daily_cap=rt["cap"],
                     )
                 )
-            elif definition.daily_cap is None:
+            elif (
+                definition.daily_cap is None
+                or not definition.display_name
+                or definition.display_name == "string"
+                or definition.reward_label == "string"
+            ):
                 definition.daily_cap = rt["cap"]
+                definition.display_name = rt["display"]
+                definition.reward_amount = 1
+                definition.reward_label = ""
         await session.commit()
 
 

@@ -430,7 +430,6 @@ async def _load_reward_defs(session: AsyncSession) -> dict[str, dict]:
     for d in result.scalars().all():
         defs[d.raid_type] = {
             "cap": d.daily_cap,
-            "reward_amount": d.reward_amount,
         }
     return defs
 
@@ -474,13 +473,13 @@ async def process_payout(
             if count_to_pay <= 0:
                 break
             take = min(count_to_pay, available[day])
-            reward_amount = (defs.get(raid_type, {}).get("reward_amount") or 0) * take
+            # 1 rune per completion
             pr = PayoutRecord(
                 member_uuid=member_uuid,
                 raid_type=raid_type,
                 day=day,
                 count_paid=take,
-                reward_amount=reward_amount,
+                reward_amount=take,
                 paid_by_discord_id=paid_by_discord_id,
                 paid_by_username=paid_by_username,
             )

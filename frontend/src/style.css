@@ -906,6 +906,36 @@ tr.voiding td {
   transform: translateX(-50%) translateY(0);
 }
 
+/* ── Settings ────────────────────────────────── */
+
+.settings-intro {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-bottom: 0.9rem;
+  max-width: 40rem;
+  line-height: 1.5;
+}
+
+.settings-table td {
+  vertical-align: middle;
+}
+
+.settings-input {
+  width: 5rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: var(--accent-light);
+}
+
 /* ── Scrollbar ───────────────────────────────── */
 
 ::-webkit-scrollbar {

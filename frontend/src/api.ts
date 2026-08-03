@@ -156,6 +156,18 @@ export async function fetchRewardDefinitions(): Promise<RewardDefinition[]> {
   return fetchJson<RewardDefinition[]>("/api/reward-definitions");
 }
 
+export async function updateRewardDefinition(
+  id: number,
+  patch: Partial<
+    Pick<RewardDefinition, "daily_cap" | "display_name">
+  >,
+): Promise<RewardDefinition> {
+  return fetchJson<RewardDefinition>(`/api/reward-definitions/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
+}
+
 export async function fetchRewardSummary(
   from: string,
   to: string,

@@ -4,6 +4,7 @@ import {
   fetchPayoutRecords,
   fetchServerStatus,
   fetchRewardDefinitions,
+  updateRewardDefinition,
   createPayout,
   voidPayoutRecord,
   fetchDiscordLoginUrl,
@@ -23,7 +24,7 @@ import {
   RAID_RUNES,
 } from "./api.js";
 
-type View = "rewards" | "payouts" | "status";
+type View = "rewards" | "payouts" | "status" | "settings";
 type Range = "7d" | "14d" | "30d" | "all" | "custom";
 
 const RAID_TYPES = ["notg", "nol", "tcc", "tna", "wtp"];
@@ -31,6 +32,7 @@ const VIEW_LABELS: Record<View, string> = {
   rewards: "Rewards",
   payouts: "Payouts",
   status: "Status",
+  settings: "Settings",
 };
 
 const hashParams = new URLSearchParams(location.hash.slice(1));
@@ -94,6 +96,7 @@ let perDayLoading = new Set<string>();
 let voidingPayoutId: number | null = null;
 let payingMember: string | null = null;
 let confirmingVoidId: number | null = null;
+let savingDefId: number | null = null;
 let currentUser: CurrentUser | null = null;
 
 function now(): Date {
@@ -196,7 +199,7 @@ function render() {
 
     <main class="main">
       <div class="controls">
-        <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("payouts")}${viewBtnHtml("status")}</div>
+        <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("payouts")}${viewBtnHtml("status")}${currentUser?.is_admin ? viewBtnHtml("settings") : ""}</div>
         ${showRange
           ? `<div class="range-group">${rangeBtnHtml("7d", "7 days")}${rangeBtnHtml("14d", "14 days")}${rangeBtnHtml("30d", "30 days")}${rangeBtnHtml("all", "All time")}${rangeBtnHtml("custom", "Custom")}</div>
              ${currentRange === "custom"
@@ -298,6 +301,8 @@ function render() {
     renderRewards($contentEl, $statusBarEl);
   } else if (currentView === "payouts") {
     renderPayouts($contentEl, $statusBarEl);
+  } else if (currentView === "settings") {
+    renderSettings($contentEl, $statusBarEl);
   } else {
     renderStatus($contentEl, $statusBarEl);
   }
@@ -850,6 +855,76 @@ function renderStatus($el: HTMLElement, $status: HTMLElement) {
   $el.innerHTML = html;
 
   document.getElementById("fetch-now-btn")?.addEventListener("click", handleFetchNow);
+}
+
+// ── Settings view ──────────────────────────────────────────────
+
+function renderSettings($el: HTMLElement, $status: HTMLElement) {
+  $status.innerHTML = `<span class="status-info">Reward settings</span>`;
+
+  if (!currentUser?.is_admin) {
+    $el.innerHTML = `<div class="error-state"><p>Admin access required.</p></div>`;
+    return;
+  }
+
+  if (rewardDefs === null) {
+    $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading settings…</p></div>`;
+    return;
+  }
+
+  let html = `
+    <div class="settings-intro"><p>Daily caps per raid. Caps limit how many completions count toward a payout per member per day. Leave empty for unlimited.</p></div>
+    <div class="table-wrap"><table class="raid-table settings-table">
+      <thead>
+        <tr>
+          <th>Raid</th>
+          <th>Name</th>
+          <th>Daily cap</th>
+          <th class="col-action"></th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  for (const def of rewardDefs) {
+    const info = RAID_RUNES[def.raid_type];
+    const saving = savingDefId === def.id;
+    html += `<tr>
+      <td class="overview-cell">${info ? runeTag(info.rune, info.color) : escapeHtml(def.raid_type)}</td>
+      <td>${escapeHtml(def.display_name)}</td>
+      <td><input class="settings-input settings-cap" type="number" min="0" data-def="${def.id}" value="${def.daily_cap ?? ""}" placeholder="unlimited"></td>
+      <td class="col-action">
+        <button class="btn-pay settings-save" data-def="${def.id}" ${saving ? "disabled" : ""}>${saving ? "Saving…" : "Save"}</button>
+      </td>
+    </tr>`;
+  }
+
+  html += `</tbody></table></div>`;
+  $el.innerHTML = html;
+
+  document.querySelectorAll(".settings-save").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number((btn as HTMLElement).dataset.def);
+      const $cap = document.querySelector(`.settings-cap[data-def="${id}"]`) as HTMLInputElement | null;
+      if (!$cap) return;
+
+      const capRaw = $cap.value.trim();
+      const daily_cap = capRaw === "" ? null : Math.max(0, Math.floor(Number(capRaw) || 0));
+
+      savingDefId = id;
+      renderSettings($el, $status);
+      try {
+        await updateRewardDefinition(id, { daily_cap });
+        rewardDefs = await fetchRewardDefinitions();
+        showToast("Settings saved");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "error";
+        showToast(`Failed to save: ${msg}`);
+      }
+      savingDefId = null;
+      renderSettings($el, $status);
+    });
+  });
 }
 
 // ── Fetch now action ───────────────────────────────────────────
