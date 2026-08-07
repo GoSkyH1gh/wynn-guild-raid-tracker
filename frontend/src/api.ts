@@ -48,6 +48,25 @@ export interface RewardDay {
   entries: RewardDayEntry[];
 }
 
+export interface Cycle {
+  index: number;
+  start: string;
+  end: string;
+  start_date: string;
+  end_date: string;
+  display_end: string;
+  payout_deadline: string;
+  is_current: boolean;
+  is_over: boolean;
+}
+
+export interface CycleConfig {
+  anchor: string;
+  cycle_0_days: number;
+  schedule: number[];
+  payout_window_days: number;
+}
+
 export interface PayoutChunk {
   day: string;
   member_uuid: string;
@@ -182,6 +201,23 @@ export async function fetchRewardPerDay(
   let url = `/api/rewards/per-day?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   if (member_uuid) url += `&member_uuid=${member_uuid}`;
   return fetchJson<RewardDay[]>(url);
+}
+
+export async function fetchCycles(): Promise<Cycle[]> {
+  return fetchJson<Cycle[]>("/api/cycles");
+}
+
+export async function fetchCycleConfig(): Promise<CycleConfig> {
+  return fetchJson<CycleConfig>("/api/cycle-config");
+}
+
+export async function updateCycleConfig(
+  config: CycleConfig,
+): Promise<CycleConfig> {
+  return fetchJson<CycleConfig>("/api/cycle-config", {
+    method: "PUT",
+    body: JSON.stringify(config),
+  });
 }
 
 export async function createPayout(body: {

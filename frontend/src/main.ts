@@ -1,10 +1,13 @@
 import {
   fetchRewardSummary,
   fetchRewardPerDay,
+  fetchCycles,
   fetchPayoutRecords,
   fetchServerStatus,
   fetchRewardDefinitions,
   updateRewardDefinition,
+  fetchCycleConfig,
+  updateCycleConfig,
   createPayout,
   voidPayoutRecord,
   fetchDiscordLoginUrl,
@@ -21,11 +24,12 @@ import {
   type ServerStatus,
   type CurrentUser,
   type RewardDefinition,
+  type Cycle,
+  type CycleConfig,
   RAID_RUNES,
 } from "./api.js";
 
 type View = "rewards" | "payouts" | "status" | "settings";
-type Range = "7d" | "14d" | "30d" | "all" | "custom";
 
 const RAID_TYPES = ["notg", "nol", "tcc", "tna", "wtp"];
 const VIEW_LABELS: Record<View, string> = {
@@ -52,14 +56,10 @@ if (errorParam === "unauthorized") {
 }
 
 let currentView: View = (params.get("view") as View) ?? "rewards";
-let currentRange: Range = (params.get("range") as Range) ?? "7d";
-
-function isoDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+const cycleParam = Number(params.get("cycle"));
+let selectedCycleIndex: number | null =
+  Number.isInteger(cycleParam) && cycleParam >= 0 ? cycleParam : null;
+let cycles: Cycle[] | null = null;
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => {
@@ -78,11 +78,6 @@ function escapeHtml(s: string): string {
   });
 }
 
-const _now = new Date();
-const _defaultFrom = new Date(_now);
-_defaultFrom.setDate(_defaultFrom.getDate() - 7);
-let customFrom = params.get("from") ?? params.get("custom-from") ?? isoDate(_defaultFrom);
-let customTo = params.get("to") ?? params.get("custom-to") ?? isoDate(_now);
 let summaryData: RewardSummary[] | null = null;
 let perDayData: RewardDay[] | null = null;
 let payoutsData: PayoutRecord[] | null = null;
@@ -97,27 +92,57 @@ let voidingPayoutId: number | null = null;
 let payingMember: string | null = null;
 let confirmingVoidId: number | null = null;
 let savingDefId: number | null = null;
+let cycleConfig: CycleConfig | null = null;
+let savingCycleConfig = false;
 let currentUser: CurrentUser | null = null;
 
 function now(): Date {
   return new Date();
 }
 
-function rangeFrom(r: Range): { from: Date; to: Date } {
-  const to = now();
-  if (r === "custom" && customFrom && customTo) {
-    const from = new Date(`${customFrom}T00:00:00`);
-    const toEnd = new Date(`${customTo}T23:59:59.999`);
-    if (!Number.isNaN(from.getTime()) && !Number.isNaN(toEnd.getTime()) && from <= toEnd) {
-      return { from, to: toEnd };
-    }
-  }
-  const from = new Date(to);
-  if (r === "7d") from.setDate(from.getDate() - 7);
-  else if (r === "14d") from.setDate(from.getDate() - 14);
-  else if (r === "30d") from.setDate(from.getDate() - 30);
-  else from.setFullYear(from.getFullYear() - 10);
-  return { from, to };
+function selectedCycle(): Cycle | null {
+  if (!cycles || cycles.length === 0) return null;
+  const found = cycles.find((c) => c.index === selectedCycleIndex);
+  if (found) return found;
+  const fallback = cycles.find((c) => c.is_current) ?? cycles[cycles.length - 1]!;
+  selectedCycleIndex = fallback.index;
+  return fallback;
+}
+
+function cycleFromTo(c: Cycle): { from: Date; to: Date } {
+  return { from: new Date(c.start), to: new Date(c.end) };
+}
+
+function payoutBounds(c: Cycle): { from: Date; to: Date } {
+  // ongoing cycle: pay the runes detected so far (cycle start → now)
+  if (c.is_current) return { from: new Date(c.start), to: now() };
+  return cycleFromTo(c);
+}
+
+function cycleLabel(c: Cycle): string {
+  const span = `Cycle ${c.index} · ${fmtDay(c.start_date)} – ${fmtDay(c.display_end)}`;
+  if (c.is_current) return `${span} (current)`;
+  if (c.is_over) return `${span} (payout window closed)`;
+  return span;
+}
+
+function cycleStatusText(c: Cycle): string {
+  const span = `Cycle ${c.index} · ${fmtDay(c.start_date)} – ${fmtDay(c.display_end)}`;
+  if (c.is_current) return `${span} · ongoing`;
+  const deadline = fmtDay(c.payout_deadline.slice(0, 10));
+  return c.is_over
+    ? `${span} · payout window closed`
+    : `${span} · payouts valid until ${deadline}`;
+}
+
+function cycleOptionsHtml(): string {
+  const list = cycles ?? [];
+  return list
+    .map(
+      (c) =>
+        `<option value="${c.index}" ${c.index === selectedCycleIndex ? "selected" : ""}>${escapeHtml(cycleLabel(c))}</option>`,
+    )
+    .join("");
 }
 
 function fmtISO(d: Date): string {
@@ -161,10 +186,6 @@ function viewBtnHtml(view: View) {
   return `<button class="view-btn${currentView === view ? " active" : ""}" data-view="${escapeHtml(view)}">${VIEW_LABELS[view]}</button>`;
 }
 
-function rangeBtnHtml(r: Range, label: string) {
-  return `<button class="range-btn${currentRange === r ? " active" : ""}" data-range="${escapeHtml(r)}">${label}</button>`;
-}
-
 function runeTag(rune: string, color: string) {
   return `<span class="rune-tag" style="--rune-color: ${color}">${rune}</span>`;
 }
@@ -175,8 +196,7 @@ function render() {
     return;
   }
 
-  const { from, to } = rangeFrom(currentRange);
-  const showRange = currentView !== "status";
+  const showCyclePicker = currentView === "rewards" && !!cycles && cycles.length > 0;
 
   const userHtml = currentUser
     ? `<div class="user-info">
@@ -200,20 +220,11 @@ function render() {
     <main class="main">
       <div class="controls">
         <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("payouts")}${viewBtnHtml("status")}${currentUser?.is_admin ? viewBtnHtml("settings") : ""}</div>
-        ${showRange
-          ? `<div class="range-group">${rangeBtnHtml("7d", "7 days")}${rangeBtnHtml("14d", "14 days")}${rangeBtnHtml("30d", "30 days")}${rangeBtnHtml("all", "All time")}${rangeBtnHtml("custom", "Custom")}</div>
-             ${currentRange === "custom"
-                ? `<div class="custom-range">
-                     <label class="date-field">
-                       <span>From</span>
-                       <input type="date" id="range-from" value="${escapeHtml(customFrom)}" max="${escapeHtml(customTo)}">
-                     </label>
-                     <label class="date-field">
-                       <span>To</span>
-                       <input type="date" id="range-to" value="${escapeHtml(customTo)}" min="${escapeHtml(customFrom)}">
-                     </label>
-                   </div>`
-               : ""}`
+        ${showCyclePicker
+          ? `<div class="cycle-group">
+               <label class="cycle-label" for="cycle-select">Cycle</label>
+               <select id="cycle-select" class="cycle-select">${cycleOptionsHtml()}</select>
+             </div>`
           : ""}
       </div>
 
@@ -252,47 +263,15 @@ function render() {
     })
   );
 
-  document.querySelectorAll(".range-btn").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      currentRange = (btn as HTMLElement).dataset.range as Range;
-      expandedMember = null;
-      const url = new URL(location.href);
-      url.searchParams.set("range", currentRange);
-      if (currentRange !== "custom") {
-        url.searchParams.delete("custom-from");
-        url.searchParams.delete("custom-to");
-        url.searchParams.delete("from");
-        url.searchParams.delete("to");
-      }
-      history.replaceState(null, "", url.href);
-      render();
-      fetchData();
-    })
-  );
-
-  const applyCustomRange = () => {
-    const $from = document.getElementById("range-from") as HTMLInputElement | null;
-    const $to = document.getElementById("range-to") as HTMLInputElement | null;
-    if (!$from || !$to) return;
-    if (!$from.value && !$to.value) return;
-    if (!$from.value) $from.value = customFrom;
-    if (!$to.value) $to.value = customTo;
-    if ($from.value > $to.value) $to.value = $from.value;
-    customFrom = $from.value;
-    customTo = $to.value;
-    currentRange = "custom";
+  document.getElementById("cycle-select")?.addEventListener("change", (e) => {
+    selectedCycleIndex = Number((e.target as HTMLSelectElement).value);
     expandedMember = null;
     const url = new URL(location.href);
-    url.searchParams.set("range", "custom");
-    url.searchParams.set("custom-from", customFrom);
-    url.searchParams.set("custom-to", customTo);
+    url.searchParams.set("cycle", String(selectedCycleIndex));
     history.replaceState(null, "", url.href);
     render();
     fetchData();
-  };
-
-  document.getElementById("range-from")?.addEventListener("change", applyCustomRange);
-  document.getElementById("range-to")?.addEventListener("change", applyCustomRange);
+  });
 
   const $contentEl = document.getElementById("content")!;
   const $statusBarEl = document.getElementById("status-bar")!;
@@ -344,17 +323,18 @@ function renderLogin() {
 // ── Rewards view ───────────────────────────────────────────────
 
 function renderRewards($el: HTMLElement, $status: HTMLElement) {
-  const { from, to } = rangeFrom(currentRange);
+  const cycle = selectedCycle();
+  const cycleText = cycle ? cycleStatusText(cycle) : "";
 
   if (isFetching) {
-    $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
+    $status.innerHTML = `<span class="status-info">${escapeHtml(cycleText)}</span>`;
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading rewards…</p></div>`;
     return;
   }
 
   if (summaryData === null) {
     if (fetchError) {
-      $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
+      $status.innerHTML = `<span class="status-info">${escapeHtml(cycleText)}</span>`;
       $el.innerHTML = `<div class="error-state"><p>Failed to load rewards</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
       document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
       return;
@@ -382,7 +362,7 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
   const totalPending = eligibleMembers.reduce((s, entry) => s + totalOf(entry[1]), 0);
 
   $status.innerHTML = `
-    <span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>
+    <span class="status-info">${escapeHtml(cycleText)}</span>
     <span class="status-summary">${members.length} players · ${totalPending} runs pending</span>
   `;
 
@@ -529,10 +509,11 @@ function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
 }
 
 function renderDayBreakdown(uuid: string): string {
-  if (perDayLoading.has(uuid)) {
+  const key = perDayCacheKey(uuid);
+  if (perDayLoading.has(key)) {
     return `<div class="loading-state"><div class="spinner"></div><p>Loading per-day details…</p></div>`;
   }
-  const cached = perDayCache.get(uuid);
+  const cached = perDayCache.get(key);
   if (cached === undefined) {
     return `<div class="loading-state"><div class="spinner"></div><p>Loading per-day…</p></div>`;
   }
@@ -550,7 +531,6 @@ function renderDayBreakdown(uuid: string): string {
     }
     byDay.set(day.day, perRaid);
   }
-  const visibleDays = constrainRangeDays(days);
 
   let html = `<div class="legend">
     <span class="legend-item"><span class="legend-swatch" style="background: color-mix(in srgb, var(--rune-tcc) 22%, transparent)"></span> over daily cap</span>
@@ -572,7 +552,7 @@ function renderDayBreakdown(uuid: string): string {
     <tbody>
   `;
 
-  for (const day of visibleDays) {
+  for (const day of days) {
     const perRaid = byDay.get(day);
     html += `<tr><td class="col-member"><span class="member-name">${fmtDay(day)}</span></td>`;
     for (const rt of RAID_TYPES) {
@@ -593,32 +573,35 @@ function renderDayBreakdown(uuid: string): string {
   return html;
 }
 
-function constrainRangeDays(days: string[]): string[] {
-  const sorted = [...days].sort();
-  const max = 14;
-  if (sorted.length <= max) return sorted;
-  return sorted.slice(-max);
+function perDayCacheKey(uuid: string): string {
+  return `${selectedCycleIndex}:${uuid}`;
 }
 
 async function loadPerDay(uuid: string) {
-  if (perDayCache.has(uuid)) {
+  const key = perDayCacheKey(uuid);
+  if (perDayCache.has(key)) {
     render();
     return;
   }
-  perDayLoading.add(uuid);
-  perDayCache.set(uuid, []);
+  perDayLoading.add(key);
+  perDayCache.set(key, []);
   render();
 
-  const { from, to } = rangeFrom(currentRange);
+  const cycle = selectedCycle();
+  if (!cycle) {
+    perDayLoading.delete(key);
+    return;
+  }
+  const { from, to } = cycleFromTo(cycle);
   try {
     const data = await fetchRewardPerDay(fmtISO(from), fmtISO(to), uuid);
-    perDayCache.set(uuid, data);
+    perDayCache.set(key, data);
   } catch (err) {
-    perDayCache.set(uuid, null);
+    perDayCache.set(key, null);
     const msg = err instanceof Error ? err.message : "error";
     showToast(`Failed to load per-day details: ${msg}`);
   }
-  perDayLoading.delete(uuid);
+  perDayLoading.delete(key);
   render();
 }
 
@@ -633,14 +616,21 @@ async function payMember(uuid: string) {
     return;
   }
 
+  const cycle = selectedCycle();
+  if (!cycle) {
+    showToast("No cycle selected");
+    return;
+  }
+
   payingMember = uuid;
   render();
 
-  const { from, to } = rangeFrom(currentRange);
+  const { from, to } = payoutBounds(cycle);
   try {
     const result = await createPayout({ starts_at: fmtISO(from), ends_at: fmtISO(to), items });
     const total = result.reduce((s, c) => s + c.count_paid, 0);
     payingMember = null;
+    perDayCache.clear();
     await fetchData();
     showToast(`Paid out ${total} rune(s) across ${result.length} day chunk(s)`);
   } catch (err) {
@@ -652,7 +642,9 @@ async function payMember(uuid: string) {
 }
 
 async function loadSummary() {
-  const { from, to } = rangeFrom(currentRange);
+  const cycle = selectedCycle();
+  if (!cycle) return;
+  const { from, to } = cycleFromTo(cycle);
   summaryData = await fetchRewardSummary(fmtISO(from), fmtISO(to));
 }
 
@@ -744,12 +736,11 @@ async function handleVoid(payoutId: number) {
   render();
   try {
     await voidPayoutRecord(payoutId);
-    const { from, to } = rangeFrom(currentRange);
     payoutsData = await fetchPayoutRecords();
     if (currentView === "payouts") {
       render();
     } else {
-      summaryData = await fetchRewardSummary(fmtISO(from), fmtISO(to));
+      await loadSummary();
       render();
     }
     showToast("Payout voided");
@@ -867,12 +858,62 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
     return;
   }
 
-  if (rewardDefs === null) {
+  if (rewardDefs === null || cycleConfig === null) {
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading settings…</p></div>`;
     return;
   }
 
   let html = `
+    <div class="settings-intro"><p>Cycle schedule — cycles are derived from this config, so changes apply to all dates at once. Cycle 0 is a one-off bootstrap period that ends at the anchor; cycle 1 starts at the anchor. The schedule lists day-counts for cycles 1, 2, 3, … and the last entry repeats forever (e.g. <code>7, 14</code> means weekly until the 14-day cycles kick in).</p></div>
+    <div class="table-wrap"><table class="raid-table settings-table cycle-settings-table">
+      <tbody>
+        <tr>
+          <td class="settings-label">Anchor date<span class="settings-hint">cycle 1 starts here</span></td>
+          <td><input class="settings-input settings-date" type="date" id="cfg-anchor" value="${escapeHtml(cycleConfig.anchor)}"></td>
+        </tr>
+        <tr>
+          <td class="settings-label">Cycle 0 duration<span class="settings-hint">days before the anchor</span></td>
+          <td><input class="settings-input" type="number" min="0" id="cfg-cycle-0" value="${cycleConfig.cycle_0_days}"></td>
+        </tr>
+        <tr>
+          <td class="settings-label">Schedule<span class="settings-hint">day-counts, comma-separated; last repeats</span></td>
+          <td><input class="settings-input settings-schedule" type="text" id="cfg-schedule" value="${escapeHtml(cycleConfig.schedule.join(", "))}" placeholder="7, 7, 14"></td>
+        </tr>
+        <tr>
+          <td class="settings-label">Payout window<span class="settings-hint">days after a cycle ends that payouts stay valid</span></td>
+          <td><input class="settings-input" type="number" min="0" id="cfg-window" value="${cycleConfig.payout_window_days}"></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="settings-actions">
+      <button class="btn-pay settings-save" id="cycle-config-save" ${savingCycleConfig ? "disabled" : ""}>${savingCycleConfig ? "Saving…" : "Save cycle config"}</button>
+    </div></div>
+  `;
+
+  if (cycles && cycles.length > 0) {
+    html += `
+      <div class="settings-intro"><p>Cycles as currently derived:</p></div>
+      <div class="table-wrap"><table class="raid-table settings-table">
+        <thead>
+          <tr>
+            <th>Cycle</th>
+            <th>Dates</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cycles.map((c) => `
+            <tr>
+              <td class="overview-cell">Cycle ${c.index}</td>
+              <td>${fmtDay(c.start_date)} – ${fmtDay(c.display_end)}</td>
+              <td>${c.is_current ? "current" : c.is_over ? "payout window closed" : `payouts valid until ${fmtDay(c.payout_deadline.slice(0, 10))}`}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table></div>
+    `;
+  }
+
+  html += `
     <div class="settings-intro"><p>Daily caps per raid. Caps limit how many completions count toward a payout per member per day. Leave empty for unlimited.</p></div>
     <div class="table-wrap"><table class="raid-table settings-table">
       <thead>
@@ -901,6 +942,49 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
 
   html += `</tbody></table></div>`;
   $el.innerHTML = html;
+
+  document.getElementById("cycle-config-save")?.addEventListener("click", async () => {
+    const $anchor = document.getElementById("cfg-anchor") as HTMLInputElement | null;
+    const $c0 = document.getElementById("cfg-cycle-0") as HTMLInputElement | null;
+    const $sched = document.getElementById("cfg-schedule") as HTMLInputElement | null;
+    const $win = document.getElementById("cfg-window") as HTMLInputElement | null;
+    if (!$anchor || !$c0 || !$sched || !$win) return;
+
+    const schedule = $sched.value
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map(Number);
+    if (schedule.length === 0 || schedule.some((n) => !Number.isInteger(n) || n <= 0)) {
+      showToast("Schedule must be a comma-separated list of positive day counts");
+      return;
+    }
+    if (!$anchor.value) {
+      showToast("Anchor date is required");
+      return;
+    }
+
+    savingCycleConfig = true;
+    renderSettings($el, $status);
+    try {
+      cycleConfig = await updateCycleConfig({
+        anchor: $anchor.value,
+        cycle_0_days: Math.max(0, Math.floor(Number($c0.value) || 0)),
+        schedule,
+        payout_window_days: Math.max(0, Math.floor(Number($win.value) || 0)),
+      });
+      savingCycleConfig = false;
+      cycles = null;
+      selectedCycleIndex = null;
+      await fetchData();
+      showToast("Cycle config saved");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "error";
+      savingCycleConfig = false;
+      renderSettings($el, $status);
+      showToast(`Failed to save cycle config: ${msg}`);
+    }
+  });
 
   document.querySelectorAll(".settings-save").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -990,6 +1074,13 @@ async function fetchData() {
   try {
     if (rewardDefs === null) {
       rewardDefs = await fetchRewardDefinitions();
+    }
+    if (currentUser?.is_admin && cycleConfig === null) {
+      cycleConfig = await fetchCycleConfig();
+    }
+    if (cycles === null) {
+      cycles = await fetchCycles();
+      selectedCycle();
     }
     if (currentView === "rewards") {
       await loadSummary();

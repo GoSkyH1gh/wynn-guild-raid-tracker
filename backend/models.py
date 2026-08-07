@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, text
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, String, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -54,6 +54,18 @@ class RewardDefinition(Base):
     display_name: Mapped[str] = mapped_column(String(64), nullable=False)
     daily_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class CycleConfig(Base):
+    """Single-row table holding the cycle schedule the app derives cycles from."""
+
+    __tablename__ = "cycle_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    anchor: Mapped[date] = mapped_column(Date, nullable=False)
+    cycle_0_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    schedule: Mapped[list[int]] = mapped_column(JSON, nullable=False)
+    payout_window_days: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class DetectedCompletion(Base):

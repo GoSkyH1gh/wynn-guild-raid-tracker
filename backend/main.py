@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from dotenv import load_dotenv, find_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Query, Response, Request
@@ -25,10 +25,10 @@ from .auth import (
     delete_jwt_cookie,
     revoke_user_token,
 )
-from .database import AsyncSessionLocal, engine, verify_database_connection
-from .models import Base, DiscordUser, FetchLog, GuildMember, RaidSnapshot, RewardDefinition, PayoutRecord
+from .database import AsyncSessionLocal, engine, verify_database_connection, keep_database_warm
+from .models import Base, DiscordUser, FetchLog, GuildMember, RaidSnapshot, RewardDefinition, PayoutRecord, CycleConfig
 from .schemas import (
-CurrentUserOut,
+    CurrentUserOut,
     DiscordUserOut,
     DiscordUserCreate,
     SetupRequest,
@@ -46,15 +46,20 @@ CurrentUserOut,
     VoidPayoutResult,
     ServerStatus,
     TriggerResult,
+    CycleOut,
+    CycleConfigOut,
+    CycleConfigUpdate,
 )
 from .tracker import (
     get_reward_summary,
     get_reward_per_day,
+    get_cycle_schedule,
     process_payout,
     list_payouts,
     _record_fetch_log,
     snapshot_guild,
 )
+from .cycles import CycleSchedule, list_cycles
 
 load_dotenv(find_dotenv())
 
@@ -71,6 +76,14 @@ DEFAULT_RAID_TYPES = [
     {"name": "tna", "display": "The Nameless Anomaly", "cap": 6},
     {"name": "wtp", "display": "The Wartorn Palace", "cap": 0},
 ]
+
+# Testing schedule: cycle 1 starts on the first day of fetches, then weekly.
+DEFAULT_CYCLE_CONFIG = {
+    "anchor": date(2026, 7, 27),
+    "cycle_0_days": 10,
+    "schedule": [7],
+    "payout_window_days": 7,
+}
 
 
 async def _seed_reward_definitions():
@@ -97,6 +110,15 @@ async def _seed_reward_definitions():
                 definition.daily_cap = rt["cap"]
                 definition.display_name = rt["display"]
         await session.commit()
+
+
+async def _seed_cycle_config():
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(CycleConfig))
+        existing = result.scalar_one_or_none()
+        if existing is None:
+            session.add(CycleConfig(**DEFAULT_CYCLE_CONFIG))
+            await session.commit()
 
 
 async def _periodic_fetch():
@@ -140,6 +162,7 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
 
     await _seed_reward_definitions()
+    await _seed_cycle_config()
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(FetchLog).where(FetchLog.status == "running"))
@@ -151,8 +174,15 @@ async def lifespan(app: FastAPI):
 
     global _background_task
     _background_task = asyncio.create_task(_periodic_fetch())
+    _keepalive_task = asyncio.create_task(keep_database_warm())
 
     yield
+
+    _keepalive_task.cancel()
+    try:
+        await _keepalive_task
+    except asyncio.CancelledError:
+        pass
 
     if _background_task:
         _background_task.cancel()
@@ -482,6 +512,71 @@ async def update_reward_definition(
 
         await session.commit()
         return RewardDefinitionOut.model_validate(rd)
+
+
+@app.get("/api/cycles", response_model=list[CycleOut])
+async def get_cycles(current_user: dict = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        schedule = await get_cycle_schedule(session)
+        now = datetime.now(timezone.utc)
+        return [
+            {
+                "index": c.index,
+                "start": c.start,
+                "end": c.end,
+                "start_date": c.start_date,
+                "end_date": c.end_date,
+                "display_end": c.display_end,
+                "payout_deadline": c.payout_deadline,
+                "is_current": c.is_current(now),
+                "is_over": c.is_over(now),
+            }
+            for c in list_cycles(schedule, now)
+        ]
+
+
+@app.get("/api/cycle-config", response_model=CycleConfigOut)
+async def get_cycle_config(admin_user: dict = Depends(get_admin_user)):
+    async with AsyncSessionLocal() as session:
+        schedule = await get_cycle_schedule(session)
+        return {
+            "anchor": schedule.anchor,
+            "cycle_0_days": schedule.cycle_0_days,
+            "schedule": list(schedule.schedule),
+            "payout_window_days": schedule.payout_window_days,
+        }
+
+
+@app.put("/api/cycle-config", response_model=CycleConfigOut)
+async def update_cycle_config(
+    body: CycleConfigUpdate, admin_user: dict = Depends(get_admin_user)
+):
+    try:
+        CycleSchedule(
+            anchor=body.anchor,
+            cycle_0_days=body.cycle_0_days,
+            schedule=tuple(body.schedule),
+            payout_window_days=body.payout_window_days,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(CycleConfig))
+        row = result.scalar_one_or_none()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Cycle config not seeded")
+        row.anchor = body.anchor
+        row.cycle_0_days = body.cycle_0_days
+        row.schedule = body.schedule
+        row.payout_window_days = body.payout_window_days
+        await session.commit()
+        return {
+            "anchor": row.anchor,
+            "cycle_0_days": row.cycle_0_days,
+            "schedule": list(row.schedule),
+            "payout_window_days": row.payout_window_days,
+        }
 
 
 @app.get("/api/rewards/summary", response_model=list[RewardSummaryOut])
