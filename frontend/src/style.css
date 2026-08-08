@@ -885,11 +885,16 @@ body {
   color: var(--rune-tcc);
 }
 
-.cell-pending {
-  display: inline-block;
+.cell-paid {
   margin-left: 0.3rem;
   font-size: 0.68rem;
-  color: var(--text-dim);
+  color: var(--text-muted);
+}
+
+.cell-check {
+  color: var(--accent-text);
+  font-weight: 700;
+  margin-right: 0.15rem;
 }
 
 .text-muted-cell {
@@ -1153,12 +1158,25 @@ tr.voiding td {
 
 /* ── Settings ────────────────────────────────── */
 
+.settings-heading {
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent-text);
+  margin-top: 2.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
 .settings-intro {
   font-size: 0.8rem;
   color: var(--text-dim);
   margin-bottom: 0.9rem;
-  max-width: 40rem;
   line-height: 1.5;
+}
+
+.settings-intro p + p {
+  margin-top: 0.5rem;
 }
 
 .settings-table td {
@@ -1209,20 +1227,23 @@ tr.voiding td {
   padding: 0.75rem 0.25rem 0;
 }
 
-.add-user {
+.add-user-row td {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.add-user-inline {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
-  padding: 0.75rem 0.25rem 0.25rem;
 }
 
 .add-user-id {
-  width: 12rem;
+  width: 11rem;
 }
 
 .add-user-name {
-  width: 12rem;
+  width: 11rem;
 }
 
 .add-user-admin {
@@ -1252,6 +1273,10 @@ tr.voiding td {
 
 .cycle-settings-table td:first-child {
   width: 1%;
+}
+
+.cycle-settings-table td {
+  text-align: left;
 }
 
 /* ── Scrollbar ───────────────────────────────── */

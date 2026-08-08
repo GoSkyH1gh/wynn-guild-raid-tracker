@@ -471,15 +471,22 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
   );
 }
 
-function capCellHtml(p: { detected: number; payable: number; cap: number | null; pending?: number }): string {
+function capCellHtml(p: {
+  detected: number;
+  payable: number;
+  cap: number | null;
+  pending: number;
+}): string {
   const over = p.cap !== null && p.detected > p.payable;
   const overCount = p.detected - p.payable;
-  const pending = p.pending;
-  return `<td class="overview-cell${over ? " over-limit-cell" : ""}">
-    <span class="cell-payable">${p.payable}</span>
-    ${over ? `<span class="over-limit-badge">${overCount} over</span>` : ""}
-    ${pending ? `<span class="cell-pending"> · ${pending} pending</span>` : ""}
-  </td>`;
+  const paid = p.payable - p.pending;
+  let content: string;
+  if (p.pending === 0) {
+    content = `<span class="cell-paid"><span class="cell-check" aria-hidden="true">✓</span>${paid} paid</span>`;
+  } else {
+    content = `<span class="cell-payable">${p.pending}</span>${paid > 0 ? `<span class="cell-paid"> · ${paid} paid</span>` : ""}`;
+  }
+  return `<td class="overview-cell${over ? " over-limit-cell" : ""}">${content}${over ? `<span class="over-limit-badge">${overCount} over</span>` : ""}</td>`;
 }
 
 function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
@@ -499,7 +506,7 @@ function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
       if (!eligible) {
         return `<td class="overview-cell"><span class="cell-payable">${row.detected}</span></td>`;
       }
-      return capCellHtml({ detected: row.detected, payable: row.payable, cap: row.daily_cap });
+      return capCellHtml({ detected: row.detected, payable: row.payable, cap: row.daily_cap, pending: row.pending });
     }).join("")}
     <td><span class="total-runes">${pending}</span></td>
     <td class="col-action">
@@ -885,7 +892,8 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
   }
 
   let html = `
-    <div class="settings-intro"><p>Daily caps per raid. Caps limit how many completions count toward a payout per member per day. Leave empty for unlimited.</p></div>
+    <h2 class="settings-heading">Daily caps</h2>
+    <div class="settings-intro"><p>Caps limit how many completions count toward a payout per member per day. Leave empty for unlimited.</p></div>
     <div class="table-wrap"><table class="raid-table settings-table">
       <thead>
         <tr>
@@ -914,7 +922,8 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
   html += `</tbody></table></div>`;
 
   html += `
-    <div class="settings-intro"><p>Authorized users. First-time logins from unknown Discord IDs are rejected. To add someone, enable Developer Mode in Discord, right-click their profile, and copy their User ID — the username fills in automatically on their first login.</p></div>
+    <h2 class="settings-heading">Users</h2>
+    <div class="settings-intro"><p>Users are added here and sign in with Discord. Regular users can view the tracker and pay out runes; they can only void payouts they made themselves. Admins can additionally manage users, daily caps, and the cycle schedule, and can void any payout.</p><p>First-time logins from unknown Discord IDs are rejected. To add someone, enable Developer Mode in Discord, right-click their profile, and copy their User ID, the username fills in automatically on their first login.</p></div>
     <div class="table-wrap"><table class="raid-table settings-table">
       <thead>
         <tr>
@@ -929,7 +938,7 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
   `;
 
   if (usersData.length === 0) {
-    html += `<tr><td class="col-member" colspan="5"><span class="text-muted-cell">No users yet — add the first one below.</span></td></tr>`;
+    html += `<tr><td class="col-member" colspan="5"><span class="text-muted-cell">No users yet.</span></td></tr>`;
   }
 
   for (const u of usersData) {
@@ -951,17 +960,24 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
     </tr>`;
   }
 
-  html += `</tbody></table>
-    <div class="add-user">
-      <input class="settings-input add-user-id" type="text" id="new-user-id" placeholder="Discord ID" aria-label="Discord ID">
-      <input class="settings-input add-user-name" type="text" id="new-user-name" placeholder="Username (optional)" aria-label="Username (optional)">
-      <label class="add-user-admin" for="new-user-admin"><input type="checkbox" id="new-user-admin"><span class="settings-label">Admin</span></label>
-      <button class="btn-pay" id="add-user-btn" ${addingUser ? "disabled" : ""}>${addingUser ? "Adding…" : "Add user"}</button>
-    </div>
-  </div>`;
+  html += `</tbody>
+    <tr class="add-user-row">
+      <td class="col-member" colspan="4">
+        <span class="add-user-inline">
+          <input class="settings-input add-user-id" type="text" id="new-user-id" placeholder="Discord ID" aria-label="Discord ID">
+          <input class="settings-input add-user-name" type="text" id="new-user-name" placeholder="Username (optional)" aria-label="Username (optional)">
+          <label class="add-user-admin" for="new-user-admin"><input type="checkbox" id="new-user-admin"><span class="settings-label">Admin</span></label>
+        </span>
+      </td>
+      <td class="col-action">
+        <button class="btn-pay" id="add-user-btn" ${addingUser ? "disabled" : ""}>${addingUser ? "Adding…" : "Add user"}</button>
+      </td>
+    </tr>
+    </table></div>`;
 
   html += `
-    <div class="settings-intro"><p>Cycle schedule — cycles are derived from this config, so changes apply to all dates at once. Cycle 0 is a one-off period that ends at the anchor; cycle 1 starts at the anchor. The schedule lists day-counts for cycles 1, 2, 3, … and the last entry repeats forever (e.g. <code>7, 14</code> means weekly until the 14-day cycles kick in).</p></div>
+    <h2 class="settings-heading">Cycle schedule</h2>
+    <div class="settings-intro"><p>Cycles are derived from this config, so changes apply to all dates at once. Cycle 0 is a one-off period that ends at the anchor; cycle 1 starts at the anchor. The schedule lists day-counts for cycles 1, 2, 3, … and the last entry repeats forever (e.g. <code>7, 14</code> means weekly until the 14-day cycles kick in).</p></div>
     <div class="table-wrap"><table class="raid-table settings-table cycle-settings-table">
       <tbody>
         <tr>
@@ -989,7 +1005,7 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
 
   if (cycles && cycles.length > 0) {
     html += `
-      <div class="settings-intro"><p>Cycles as currently derived:</p></div>
+      <h2 class="settings-heading">Derived cycles</h2>
       <div class="table-wrap"><table class="raid-table settings-table">
         <thead>
           <tr>
