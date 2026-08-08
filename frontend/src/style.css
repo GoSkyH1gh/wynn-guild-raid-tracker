@@ -1326,14 +1326,13 @@ tr.voiding td {
   width: 12rem;
 }
 
-.settings-actions {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0.75rem 0.25rem 0;
+.add-user-row td,
+.form-footer-row td {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
-.add-user-row td {
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+.form-footer-cell {
+  text-align: right;
 }
 
 .add-user-inline {

@@ -1106,10 +1106,12 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
           <td><input class="settings-input" type="number" min="0" id="cfg-window" value="${cycleConfig.payout_window_days}"></td>
         </tr>
       </tbody>
-    </table>
-    <div class="settings-actions">
-      <button class="btn-pay settings-save" id="cycle-config-save" ${savingCycleConfig ? "disabled" : ""}>${savingCycleConfig ? "Saving…" : "Save cycle config"}</button>
-    </div></div>
+      <tr class="form-footer-row">
+        <td colspan="2" class="form-footer-cell">
+          <button class="btn-pay settings-save" id="cycle-config-save" ${savingCycleConfig ? "disabled" : ""}>${savingCycleConfig ? "Saving…" : "Save cycle config"}</button>
+        </td>
+      </tr>
+    </table></div>
   `;
 
   if (cycles && cycles.length > 0) {
