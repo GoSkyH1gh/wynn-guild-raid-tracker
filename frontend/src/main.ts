@@ -1,14 +1,20 @@
 import {
   fetchRewardSummary,
   fetchRewardPerDay,
+  fetchCycles,
   fetchPayoutRecords,
   fetchServerStatus,
   fetchRewardDefinitions,
   updateRewardDefinition,
+  fetchCycleConfig,
+  updateCycleConfig,
   createPayout,
   voidPayoutRecord,
   fetchDiscordLoginUrl,
   fetchCurrentUser,
+  fetchUsers,
+  createUser,
+  removeUser,
   triggerFetch,
   setToken,
   clearToken,
@@ -20,12 +26,16 @@ import {
   type PayoutRecord,
   type ServerStatus,
   type CurrentUser,
+  type DiscordUser,
   type RewardDefinition,
+  type Cycle,
+  type CycleConfig,
   RAID_RUNES,
+  RAID_LABELS,
 } from "./api.js";
+import { mountCyclePicker, type CyclePickerOption } from "./cycle-picker.js";
 
 type View = "rewards" | "payouts" | "status" | "settings";
-type Range = "7d" | "14d" | "30d" | "all" | "custom";
 
 const RAID_TYPES = ["notg", "nol", "tcc", "tna", "wtp"];
 const VIEW_LABELS: Record<View, string> = {
@@ -52,14 +62,10 @@ if (errorParam === "unauthorized") {
 }
 
 let currentView: View = (params.get("view") as View) ?? "rewards";
-let currentRange: Range = (params.get("range") as Range) ?? "7d";
-
-function isoDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+const cycleParam = Number(params.get("cycle"));
+let selectedCycleIndex: number | null =
+  Number.isInteger(cycleParam) && cycleParam >= 0 ? cycleParam : null;
+let cycles: Cycle[] | null = null;
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => {
@@ -78,47 +84,76 @@ function escapeHtml(s: string): string {
   });
 }
 
-const _now = new Date();
-const _defaultFrom = new Date(_now);
-_defaultFrom.setDate(_defaultFrom.getDate() - 7);
-let customFrom = params.get("from") ?? params.get("custom-from") ?? isoDate(_defaultFrom);
-let customTo = params.get("to") ?? params.get("custom-to") ?? isoDate(_now);
 let summaryData: RewardSummary[] | null = null;
 let perDayData: RewardDay[] | null = null;
 let payoutsData: PayoutRecord[] | null = null;
 let statusData: ServerStatus | null = null;
 let rewardDefs: RewardDefinition[] | null = null;
 let isFetching = false;
+let loadedOnce = false;
 let fetchError: string | null = null;
 let expandedMember: string | null = null;
 let perDayCache = new Map<string, RewardDay[] | null>();
 let perDayLoading = new Set<string>();
 let voidingPayoutId: number | null = null;
 let payingMember: string | null = null;
+let payModalMember: string | null = null;
+let payTriggerUuid: string | null = null;
+let summaryCycleIndex: number | null = null;
 let confirmingVoidId: number | null = null;
 let savingDefId: number | null = null;
+let cycleConfig: CycleConfig | null = null;
+let savingCycleConfig = false;
+let usersData: DiscordUser[] | null = null;
+let addingUser = false;
+let confirmingRemoveId: string | null = null;
+let removingUserId: string | null = null;
 let currentUser: CurrentUser | null = null;
 
 function now(): Date {
   return new Date();
 }
 
-function rangeFrom(r: Range): { from: Date; to: Date } {
-  const to = now();
-  if (r === "custom" && customFrom && customTo) {
-    const from = new Date(`${customFrom}T00:00:00`);
-    const toEnd = new Date(`${customTo}T23:59:59.999`);
-    if (!Number.isNaN(from.getTime()) && !Number.isNaN(toEnd.getTime()) && from <= toEnd) {
-      return { from, to: toEnd };
-    }
-  }
-  const from = new Date(to);
-  if (r === "7d") from.setDate(from.getDate() - 7);
-  else if (r === "14d") from.setDate(from.getDate() - 14);
-  else if (r === "30d") from.setDate(from.getDate() - 30);
-  else from.setFullYear(from.getFullYear() - 10);
-  return { from, to };
+function selectedCycle(): Cycle | null {
+  if (!cycles || cycles.length === 0) return null;
+  const found = cycles.find((c) => c.index === selectedCycleIndex);
+  if (found) return found;
+  const fallback = cycles.find((c) => c.is_current) ?? cycles[cycles.length - 1]!;
+  selectedCycleIndex = fallback.index;
+  return fallback;
 }
+
+function cycleFromTo(c: Cycle): { from: Date; to: Date } {
+  return { from: new Date(c.start), to: new Date(c.end) };
+}
+
+function payoutBounds(c: Cycle): { from: Date; to: Date } {
+  // ongoing cycle: pay the runes detected so far (cycle start → now)
+  if (c.is_current) return { from: new Date(c.start), to: now() };
+  return cycleFromTo(c);
+}
+
+function cycleStatusText(c: Cycle): string {
+  const span = `Cycle ${c.index} · ${fmtDay(c.start_date)} – ${fmtDay(c.display_end)}`;
+  if (c.is_current) return `${span} · ongoing`;
+  const deadline = fmtDay(c.payout_deadline.slice(0, 10));
+  return c.is_over
+    ? `${span} · payout window closed`
+    : `${span} · payouts valid until ${deadline}`;
+}
+
+function cycleOptions(): CyclePickerOption[] {
+  return (cycles ?? []).map((c) => ({
+    index: c.index,
+    title: `Cycle ${c.index}`,
+    dates: `${fmtDay(c.start_date)} – ${fmtDay(c.display_end)}`,
+    status: c.is_current ? "current" : c.is_over ? "closed" : "open",
+    hasData: c.has_data,
+    isSelected: c.index === selectedCycleIndex,
+  }));
+}
+
+let destroyPicker: (() => void) | null = null;
 
 function fmtISO(d: Date): string {
   return d.toISOString();
@@ -161,10 +196,6 @@ function viewBtnHtml(view: View) {
   return `<button class="view-btn${currentView === view ? " active" : ""}" data-view="${escapeHtml(view)}">${VIEW_LABELS[view]}</button>`;
 }
 
-function rangeBtnHtml(r: Range, label: string) {
-  return `<button class="range-btn${currentRange === r ? " active" : ""}" data-range="${escapeHtml(r)}">${label}</button>`;
-}
-
 function runeTag(rune: string, color: string) {
   return `<span class="rune-tag" style="--rune-color: ${color}">${rune}</span>`;
 }
@@ -175,8 +206,10 @@ function render() {
     return;
   }
 
-  const { from, to } = rangeFrom(currentRange);
-  const showRange = currentView !== "status";
+  destroyPicker?.();
+  destroyPicker = null;
+
+  const showCyclePicker = currentView === "rewards" && !!cycles && cycles.length > 0;
 
   const userHtml = currentUser
     ? `<div class="user-info">
@@ -194,26 +227,13 @@ function render() {
         <h1 class="title">Guild Raid&nbsp;Tracker</h1>
         ${userHtml}
       </div>
-      <p class="subtitle">Per-day completions · capped rune payouts</p>
     </header>
 
     <main class="main">
       <div class="controls">
         <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("payouts")}${viewBtnHtml("status")}${currentUser?.is_admin ? viewBtnHtml("settings") : ""}</div>
-        ${showRange
-          ? `<div class="range-group">${rangeBtnHtml("7d", "7 days")}${rangeBtnHtml("14d", "14 days")}${rangeBtnHtml("30d", "30 days")}${rangeBtnHtml("all", "All time")}${rangeBtnHtml("custom", "Custom")}</div>
-             ${currentRange === "custom"
-                ? `<div class="custom-range">
-                     <label class="date-field">
-                       <span>From</span>
-                       <input type="date" id="range-from" value="${escapeHtml(customFrom)}" max="${escapeHtml(customTo)}">
-                     </label>
-                     <label class="date-field">
-                       <span>To</span>
-                       <input type="date" id="range-to" value="${escapeHtml(customTo)}" min="${escapeHtml(customFrom)}">
-                     </label>
-                   </div>`
-               : ""}`
+        ${showCyclePicker
+          ? `<div class="cycle-picker-root" id="cycle-picker-root"></div>`
           : ""}
       </div>
 
@@ -244,6 +264,8 @@ function render() {
       currentView = (btn as HTMLElement).dataset.view as View;
       expandedMember = null;
       confirmingVoidId = null;
+      confirmingRemoveId = null;
+      payModalMember = null;
       const url = new URL(location.href);
       url.searchParams.set("view", currentView);
       history.replaceState(null, "", url.href);
@@ -252,47 +274,18 @@ function render() {
     })
   );
 
-  document.querySelectorAll(".range-btn").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      currentRange = (btn as HTMLElement).dataset.range as Range;
+  const $pickerRoot = document.getElementById("cycle-picker-root");
+  if ($pickerRoot) {
+    destroyPicker = mountCyclePicker($pickerRoot, cycleOptions(), (index) => {
+      selectedCycleIndex = index;
       expandedMember = null;
       const url = new URL(location.href);
-      url.searchParams.set("range", currentRange);
-      if (currentRange !== "custom") {
-        url.searchParams.delete("custom-from");
-        url.searchParams.delete("custom-to");
-        url.searchParams.delete("from");
-        url.searchParams.delete("to");
-      }
+      url.searchParams.set("cycle", String(index));
       history.replaceState(null, "", url.href);
       render();
       fetchData();
-    })
-  );
-
-  const applyCustomRange = () => {
-    const $from = document.getElementById("range-from") as HTMLInputElement | null;
-    const $to = document.getElementById("range-to") as HTMLInputElement | null;
-    if (!$from || !$to) return;
-    if (!$from.value && !$to.value) return;
-    if (!$from.value) $from.value = customFrom;
-    if (!$to.value) $to.value = customTo;
-    if ($from.value > $to.value) $to.value = $from.value;
-    customFrom = $from.value;
-    customTo = $to.value;
-    currentRange = "custom";
-    expandedMember = null;
-    const url = new URL(location.href);
-    url.searchParams.set("range", "custom");
-    url.searchParams.set("custom-from", customFrom);
-    url.searchParams.set("custom-to", customTo);
-    history.replaceState(null, "", url.href);
-    render();
-    fetchData();
-  };
-
-  document.getElementById("range-from")?.addEventListener("change", applyCustomRange);
-  document.getElementById("range-to")?.addEventListener("change", applyCustomRange);
+    });
+  }
 
   const $contentEl = document.getElementById("content")!;
   const $statusBarEl = document.getElementById("status-bar")!;
@@ -344,17 +337,26 @@ function renderLogin() {
 // ── Rewards view ───────────────────────────────────────────────
 
 function renderRewards($el: HTMLElement, $status: HTMLElement) {
-  const { from, to } = rangeFrom(currentRange);
+  const cycle = selectedCycle();
+  const cycleText = cycle ? cycleStatusText(cycle) : "";
 
-  if (isFetching) {
-    $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
+  const summaryStale = summaryCycleIndex !== selectedCycleIndex;
+  if ((isFetching && !loadedOnce) || (summaryStale && !fetchError)) {
+    $status.innerHTML = `<span class="status-info">${escapeHtml(cycleText)}</span>`;
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading rewards…</p></div>`;
+    return;
+  }
+
+  if (summaryStale && fetchError) {
+    $status.innerHTML = `<span class="status-info">${escapeHtml(cycleText)}</span>`;
+    $el.innerHTML = `<div class="error-state"><p>Failed to load rewards</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
+    document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
     return;
   }
 
   if (summaryData === null) {
     if (fetchError) {
-      $status.innerHTML = `<span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>`;
+      $status.innerHTML = `<span class="status-info">${escapeHtml(cycleText)}</span>`;
       $el.innerHTML = `<div class="error-state"><p>Failed to load rewards</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
       document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
       return;
@@ -382,7 +384,7 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
   const totalPending = eligibleMembers.reduce((s, entry) => s + totalOf(entry[1]), 0);
 
   $status.innerHTML = `
-    <span class="status-info">${fmtDate(fmtISO(from))} — ${fmtDate(fmtISO(to))}</span>
+    <span class="status-info">${escapeHtml(cycleText)}</span>
     <span class="status-summary">${members.length} players · ${totalPending} runs pending</span>
   `;
 
@@ -447,6 +449,7 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
     </tfoot>
   </table></div>`;
   $el.innerHTML = html;
+  $el.insertAdjacentHTML("beforeend", payoutModalHtml());
 
   document.querySelectorAll(".member-row").forEach((row) => {
     const toggle = () => {
@@ -461,10 +464,11 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
       }
     };
     row.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest("[data-pay]")) return;
+      if ((e.target as HTMLElement).closest("[data-pay-open]")) return;
       toggle();
     });
     row.addEventListener("keydown", (e) => {
+      if ((e.target as HTMLElement).closest("[data-pay-open]")) return;
       const ke = e as KeyboardEvent;
       if (ke.key === "Enter" || ke.key === " ") {
         e.preventDefault();
@@ -473,24 +477,170 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
     });
   });
 
-  document.querySelectorAll(".btn-pay").forEach((btn) =>
+  document.querySelectorAll("[data-pay-open]").forEach((btn) =>
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const uuid = (e.currentTarget as HTMLElement).dataset.pay!;
-      void payMember(uuid);
+      payTriggerUuid = (e.currentTarget as HTMLElement).dataset.payOpen!;
+      payModalMember = payTriggerUuid;
+      renderRewards($el, $status);
     })
   );
+
+  if (payModalMember) {
+    const $overlay = document.getElementById("pay-modal");
+    $overlay?.querySelector<HTMLInputElement>(".pay-input")?.focus();
+
+    const updateModal = () => {
+      const $total = document.getElementById("pay-total");
+      const $confirm = document.getElementById("pay-confirm") as HTMLButtonElement | null;
+      const $error = document.getElementById("pay-error");
+      let sum = 0;
+      let invalid = false;
+      let invalidMax = 0;
+      document.querySelectorAll<HTMLInputElement>(".pay-input").forEach((inp) => {
+        const max = Number(inp.max);
+        const raw = Number(inp.value);
+        const ok = Number.isInteger(raw) && raw >= 0 && raw <= max;
+        inp.classList.toggle("invalid", !ok);
+        inp.setAttribute("aria-invalid", String(!ok));
+        if (!ok) {
+          invalid = true;
+          invalidMax = Math.max(invalidMax, max);
+        } else {
+          sum += Math.max(0, raw);
+        }
+      });
+      if ($error) {
+        $error.textContent = invalid ? `Amounts must be whole numbers between 0 and ${invalidMax}` : "";
+        $error.hidden = !invalid;
+      }
+      if ($total) $total.textContent = String(sum);
+      if ($confirm) {
+        $confirm.textContent = sum > 0 ? `Pay ${sum} rune${sum === 1 ? "" : "s"}` : "Pay";
+        $confirm.disabled = invalid || sum === 0;
+      }
+    };
+
+    document.querySelectorAll<HTMLInputElement>(".pay-input").forEach((inp) =>
+      inp.addEventListener("input", updateModal)
+    );
+    updateModal();
+
+    const closeModal = () => {
+      const uuid = payTriggerUuid;
+      payModalMember = null;
+      document.removeEventListener("keydown", onModalKeydown);
+      renderRewards($el, $status);
+      if (uuid) {
+        document.querySelector<HTMLElement>(`[data-pay-open="${uuid}"]`)?.focus();
+      }
+      payTriggerUuid = null;
+    };
+
+    const onModalKeydown = (e: KeyboardEvent) => {
+      if (payModalMember === null || currentView !== "rewards") return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeModal();
+        return;
+      }
+      if (e.key === "Tab" && $overlay) {
+        const focusables = [
+          ...$overlay.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+          ),
+        ].filter((el) => el.offsetParent !== null);
+        if (focusables.length === 0) return;
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
+        const active = document.activeElement;
+        const inside = (el: Element | null): boolean => el !== null && $overlay.contains(el);
+        if (e.shiftKey && (active === first || !inside(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && (active === last || !inside(active))) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", onModalKeydown);
+
+    $overlay?.addEventListener("pointerdown", (e) => {
+      if (e.target === $overlay) closeModal();
+    });
+    document.getElementById("pay-cancel")?.addEventListener("click", closeModal);
+    document.getElementById("pay-confirm")?.addEventListener("click", async () => {
+      const uuid = payModalMember;
+      if (!uuid) return;
+      const items = [...document.querySelectorAll<HTMLInputElement>(".pay-input")]
+        .map((inp) => ({
+          member_uuid: uuid,
+          raid_type: inp.dataset.raid!,
+          count: Math.max(0, Math.floor(Number(inp.value) || 0)),
+        }))
+        .filter((it) => it.count > 0);
+      payModalMember = null;
+      document.removeEventListener("keydown", onModalKeydown);
+      await performPayout(uuid, items);
+      document.querySelector<HTMLElement>(`[data-pay-open="${uuid}"]`)?.focus();
+      payTriggerUuid = null;
+    });
+  }
 }
 
-function capCellHtml(p: { detected: number; payable: number; cap: number | null; pending?: number }): string {
+function capCellHtml(p: {
+  detected: number;
+  payable: number;
+  cap: number | null;
+  pending: number;
+}): string {
   const over = p.cap !== null && p.detected > p.payable;
   const overCount = p.detected - p.payable;
-  const pending = p.pending;
-  return `<td class="overview-cell${over ? " over-limit-cell" : ""}">
-    <span class="cell-payable">${p.payable}</span>
-    ${over ? `<span class="over-limit-badge">${overCount} over</span>` : ""}
-    ${pending ? `<span class="cell-pending"> · ${pending} pending</span>` : ""}
-  </td>`;
+  const paid = p.payable - p.pending;
+  let content: string;
+  if (p.pending === 0) {
+    content = `<span class="cell-paid"><span class="cell-check" aria-hidden="true">✓</span>${paid} paid</span>`;
+  } else {
+    content = `<span class="cell-payable">${p.pending}</span>${paid > 0 ? `<span class="cell-paid"> · ${paid} paid</span>` : ""}`;
+  }
+  return `<td class="overview-cell${over ? " over-limit-cell" : ""}">${content}${over ? `<span class="over-limit-badge">${overCount} over</span>` : ""}</td>`;
+}
+
+function payoutModalHtml(): string {
+  if (!payModalMember) return "";
+  if (selectedCycle()?.is_over) return "";
+  const rows = (summaryData ?? []).filter(
+    (r) => r.member_uuid === payModalMember && r.pending > 0 && r.is_eligible,
+  );
+  if (rows.length === 0) return "";
+  const total = rows.reduce((s, r) => s + r.pending, 0);
+  return `
+    <div class="modal-overlay" id="pay-modal">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="pay-modal-title" aria-describedby="pay-modal-hint">
+        <h2 class="modal-title" id="pay-modal-title">Pay out — ${escapeHtml(rows[0]!.username)}</h2>
+        <p class="modal-hint" id="pay-modal-hint">Set how many runes to pay per raid. Leave 0 to skip a raid.</p>
+        <div class="modal-rows">
+          ${rows
+            .map((r) => {
+              const info = RAID_RUNES[r.raid_type]!;
+              return `<div class="pay-row">
+                ${runeTag(info.rune, info.color)}
+                <span class="pay-row-name">${escapeHtml(info.rune)}<span class="pay-row-sub">${escapeHtml(RAID_LABELS[r.raid_type] ?? r.raid_type)}</span></span>
+                <span class="pay-row-pending">${r.pending} pending</span>
+                <input class="settings-input pay-input" type="number" min="0" max="${r.pending}" value="${r.pending}" data-raid="${escapeHtml(r.raid_type)}" aria-label="${escapeHtml(RAID_LABELS[r.raid_type] ?? r.raid_type)} payout count">
+              </div>`;
+            })
+            .join("")}
+        </div>
+        <p class="pay-error" id="pay-error" role="alert" hidden></p>
+        <div class="modal-total"><span>Total</span><span id="pay-total">${total}</span></div>
+        <div class="modal-actions">
+          <button class="btn-logout" id="pay-cancel">Cancel</button>
+          <button class="btn-pay" id="pay-confirm">Pay ${total} runes</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
@@ -500,6 +650,7 @@ function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
   const pending = rows.reduce((s, r) => s + r.pending, 0);
   const expanded = expandedMember === uuid;
   const paying = payingMember === uuid;
+  const cycleOver = selectedCycle()?.is_over ?? false;
 
   let html = `<tr class="member-row ${expanded ? "selected" : ""}${eligible ? "" : " ineligible"}" data-member="${escapeHtml(uuid)}" tabindex="0">
     <td class="col-member"><span class="member-name">${escapeHtml(first.username)}</span></td>
@@ -510,13 +661,13 @@ function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
       if (!eligible) {
         return `<td class="overview-cell"><span class="cell-payable">${row.detected}</span></td>`;
       }
-      return capCellHtml({ detected: row.detected, payable: row.payable, cap: row.daily_cap });
+      return capCellHtml({ detected: row.detected, payable: row.payable, cap: row.daily_cap, pending: row.pending });
     }).join("")}
     <td><span class="total-runes">${pending}</span></td>
     <td class="col-action">
-      ${eligible && pending > 0
-        ? `<button class="btn-pay" data-pay="${escapeHtml(uuid)}" ${paying ? "disabled" : ""}>${paying ? "Paying…" : `Pay ${pending}`}</button>`
-        : `<span class="text-muted-cell">${eligible ? "—" : "no payout"}</span>`}
+      ${eligible && pending > 0 && !cycleOver
+        ? `<button class="btn-pay" data-pay-open="${escapeHtml(uuid)}" aria-haspopup="dialog" ${paying ? "disabled" : ""}>${paying ? "Paying…" : `Pay ${pending}`}</button>`
+        : `<span class="text-muted-cell">${eligible ? (cycleOver ? "closed" : "—") : "no payout"}</span>`}
     </td>
   </tr>`;
 
@@ -529,10 +680,11 @@ function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
 }
 
 function renderDayBreakdown(uuid: string): string {
-  if (perDayLoading.has(uuid)) {
+  const key = perDayCacheKey(uuid);
+  if (perDayLoading.has(key)) {
     return `<div class="loading-state"><div class="spinner"></div><p>Loading per-day details…</p></div>`;
   }
-  const cached = perDayCache.get(uuid);
+  const cached = perDayCache.get(key);
   if (cached === undefined) {
     return `<div class="loading-state"><div class="spinner"></div><p>Loading per-day…</p></div>`;
   }
@@ -550,7 +702,6 @@ function renderDayBreakdown(uuid: string): string {
     }
     byDay.set(day.day, perRaid);
   }
-  const visibleDays = constrainRangeDays(days);
 
   let html = `<div class="legend">
     <span class="legend-item"><span class="legend-swatch" style="background: color-mix(in srgb, var(--rune-tcc) 22%, transparent)"></span> over daily cap</span>
@@ -572,7 +723,7 @@ function renderDayBreakdown(uuid: string): string {
     <tbody>
   `;
 
-  for (const day of visibleDays) {
+  for (const day of days) {
     const perRaid = byDay.get(day);
     html += `<tr><td class="col-member"><span class="member-name">${fmtDay(day)}</span></td>`;
     for (const rt of RAID_TYPES) {
@@ -593,54 +744,66 @@ function renderDayBreakdown(uuid: string): string {
   return html;
 }
 
-function constrainRangeDays(days: string[]): string[] {
-  const sorted = [...days].sort();
-  const max = 14;
-  if (sorted.length <= max) return sorted;
-  return sorted.slice(-max);
+function perDayCacheKey(uuid: string): string {
+  return `${selectedCycleIndex}:${uuid}`;
 }
 
 async function loadPerDay(uuid: string) {
-  if (perDayCache.has(uuid)) {
+  const key = perDayCacheKey(uuid);
+  if (perDayCache.has(key)) {
     render();
     return;
   }
-  perDayLoading.add(uuid);
-  perDayCache.set(uuid, []);
+  perDayLoading.add(key);
+  perDayCache.set(key, []);
   render();
 
-  const { from, to } = rangeFrom(currentRange);
+  const cycle = selectedCycle();
+  if (!cycle) {
+    perDayLoading.delete(key);
+    return;
+  }
+  const { from, to } = cycleFromTo(cycle);
   try {
     const data = await fetchRewardPerDay(fmtISO(from), fmtISO(to), uuid);
-    perDayCache.set(uuid, data);
+    perDayCache.set(key, data);
   } catch (err) {
-    perDayCache.set(uuid, null);
+    perDayCache.set(key, null);
     const msg = err instanceof Error ? err.message : "error";
     showToast(`Failed to load per-day details: ${msg}`);
   }
-  perDayLoading.delete(uuid);
+  perDayLoading.delete(key);
   render();
 }
 
-async function payMember(uuid: string) {
-  const rows = (summaryData ?? []).filter((r) => r.member_uuid === uuid);
-  const items = rows
-    .filter((r) => r.pending > 0 && r.is_eligible)
-    .map((r) => ({ member_uuid: uuid, raid_type: r.raid_type, count: r.pending }));
-
+async function performPayout(
+  uuid: string,
+  items: { member_uuid: string; raid_type: string; count: number }[],
+) {
   if (items.length === 0) {
-    showToast("Nothing pending for this player");
+    showToast("Nothing selected to pay out");
+    return;
+  }
+
+  const cycle = selectedCycle();
+  if (!cycle) {
+    showToast("No cycle selected");
+    return;
+  }
+  if (cycle.is_over) {
+    showToast("This cycle's payout window has closed");
     return;
   }
 
   payingMember = uuid;
   render();
 
-  const { from, to } = rangeFrom(currentRange);
+  const { from, to } = payoutBounds(cycle);
   try {
     const result = await createPayout({ starts_at: fmtISO(from), ends_at: fmtISO(to), items });
     const total = result.reduce((s, c) => s + c.count_paid, 0);
     payingMember = null;
+    perDayCache.clear();
     await fetchData();
     showToast(`Paid out ${total} rune(s) across ${result.length} day chunk(s)`);
   } catch (err) {
@@ -652,14 +815,19 @@ async function payMember(uuid: string) {
 }
 
 async function loadSummary() {
-  const { from, to } = rangeFrom(currentRange);
+  const cycle = selectedCycle();
+  if (!cycle) return;
+  const { from, to } = cycleFromTo(cycle);
   summaryData = await fetchRewardSummary(fmtISO(from), fmtISO(to));
+  summaryCycleIndex = selectedCycleIndex;
 }
 
 // ── Payouts view ───────────────────────────────────────────────
 
 function voidActionHtml(p: PayoutRecord): string {
-  if (!currentUser?.is_admin) return `<span class="text-muted-cell">—</span>`;
+  const canVoid =
+    currentUser?.is_admin || p.paid_by_discord_id === currentUser?.discord_id;
+  if (!canVoid) return `<span class="text-muted-cell">—</span>`;
   if (voidingPayoutId === p.id) {
     return `<button class="btn-pay btn-pay-busy" disabled><span class="btn-spinner"></span>Voiding…</button>`;
   }
@@ -672,7 +840,7 @@ function voidActionHtml(p: PayoutRecord): string {
 function renderPayouts($el: HTMLElement, $status: HTMLElement) {
   $status.innerHTML = `<span class="status-info">Payout history</span>`;
 
-  if (isFetching) {
+  if (isFetching && !loadedOnce) {
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading payouts…</p></div>`;
     return;
   }
@@ -712,7 +880,7 @@ function renderPayouts($el: HTMLElement, $status: HTMLElement) {
     html += `<tr class="${voidingPayoutId === p.id ? "voiding" : ""}">
       <td>${fmtDate(p.paid_at)}</td>
       <td class="col-member"><span class="member-name">${escapeHtml(p.member_username)}</span></td>
-      <td class="overview-cell">${runeTag(info.rune, info.color)}</td>
+      <td class="overview-cell">${runeTag(info.rune, info.color)}<span class="rune-label">${escapeHtml(p.raid_type)}</span></td>
       <td>${fmtDay(p.day)}</td>
       <td>${p.count_paid}</td>
       <td class="col-member">${p.paid_by_username ? escapeHtml(p.paid_by_username) : "—"}</td>
@@ -744,12 +912,11 @@ async function handleVoid(payoutId: number) {
   render();
   try {
     await voidPayoutRecord(payoutId);
-    const { from, to } = rangeFrom(currentRange);
     payoutsData = await fetchPayoutRecords();
     if (currentView === "payouts") {
       render();
     } else {
-      summaryData = await fetchRewardSummary(fmtISO(from), fmtISO(to));
+      await loadSummary();
       render();
     }
     showToast("Payout voided");
@@ -766,7 +933,7 @@ async function handleVoid(payoutId: number) {
 function renderStatus($el: HTMLElement, $status: HTMLElement) {
   $status.innerHTML = `<span class="status-info">Server status</span>`;
 
-  if (isFetching) {
+  if (isFetching && !loadedOnce) {
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading status…</p></div>`;
     return;
   }
@@ -859,6 +1026,16 @@ function renderStatus($el: HTMLElement, $status: HTMLElement) {
 
 // ── Settings view ──────────────────────────────────────────────
 
+function removeUserButtonHtml(discordId: string): string {
+  if (removingUserId === discordId) {
+    return `<button class="btn-pay btn-pay-busy" disabled><span class="btn-spinner"></span>Removing…</button>`;
+  }
+  if (confirmingRemoveId === discordId) {
+    return `<button class="btn-pay btn-pay-confirm" data-remove="${escapeHtml(discordId)}">Confirm remove?</button>`;
+  }
+  return `<button class="btn-pay" data-remove="${escapeHtml(discordId)}">Remove</button>`;
+}
+
 function renderSettings($el: HTMLElement, $status: HTMLElement) {
   $status.innerHTML = `<span class="status-info">Reward settings</span>`;
 
@@ -867,13 +1044,14 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
     return;
   }
 
-  if (rewardDefs === null) {
+  if (rewardDefs === null || cycleConfig === null) {
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading settings…</p></div>`;
     return;
   }
 
   let html = `
-    <div class="settings-intro"><p>Daily caps per raid. Caps limit how many completions count toward a payout per member per day. Leave empty for unlimited.</p></div>
+    <h2 class="settings-heading">Daily caps</h2>
+    <div class="settings-intro"><p>Caps limit how many completions count toward a payout per member per day. Leave empty for unlimited.</p></div>
     <div class="table-wrap"><table class="raid-table settings-table">
       <thead>
         <tr>
@@ -900,7 +1078,210 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
   }
 
   html += `</tbody></table></div>`;
+
+  html += `
+    <h2 class="settings-heading">Users</h2>
+    <div class="settings-intro"><p>Users are added here and sign in with Discord. Regular users can view the tracker and pay out runes; they can only void payouts they made themselves. Admins can additionally manage users, daily caps, and the cycle schedule, and can void any payout.</p><p>First-time logins from unknown Discord IDs are rejected. To add someone, enable Developer Mode in Discord, right-click their profile, and copy their User ID, the username fills in automatically on their first login.</p></div>
+    <div class="table-wrap"><table class="raid-table settings-table">
+      <thead>
+        <tr>
+          <th class="col-member">User</th>
+          <th>Role</th>
+          <th>Added</th>
+          <th>Last login</th>
+          <th class="col-action"></th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  if (usersData.length === 0) {
+    html += `<tr><td class="col-member" colspan="5"><span class="text-muted-cell">No users yet.</span></td></tr>`;
+  }
+
+  for (const u of usersData) {
+    const isSelf = u.discord_id === currentUser.discord_id;
+    html += `<tr>
+      <td class="col-member">
+        <span class="user-cell">
+          ${u.avatar_url
+            ? `<img class="user-avatar" src="${escapeHtml(u.avatar_url)}" alt="" width="24" height="24">`
+            : `<span class="user-avatar-fallback">${escapeHtml(u.username[0]?.toUpperCase() ?? "?")}</span>`}
+          <span class="member-name">${escapeHtml(u.username)}</span>
+          ${isSelf ? `<span class="text-muted-cell">(you)</span>` : ""}
+        </span>
+      </td>
+      <td>${u.is_admin ? `<span class="tag-admin">admin</span>` : `<span class="text-muted-cell">member</span>`}</td>
+      <td>${fmtDate(u.created_at)}</td>
+      <td>${fmtAgo(u.last_login)}</td>
+      <td class="col-action">${isSelf ? `<span class="text-muted-cell">—</span>` : removeUserButtonHtml(u.discord_id)}</td>
+    </tr>`;
+  }
+
+  html += `</tbody>
+    <tr class="add-user-row">
+      <td class="col-member" colspan="4">
+        <span class="add-user-inline">
+          <input class="settings-input add-user-id" type="text" id="new-user-id" placeholder="Discord ID" aria-label="Discord ID">
+          <input class="settings-input add-user-name" type="text" id="new-user-name" placeholder="Username (optional)" aria-label="Username (optional)">
+          <label class="add-user-admin" for="new-user-admin"><input type="checkbox" id="new-user-admin"><span class="settings-label">Admin</span></label>
+        </span>
+      </td>
+      <td class="col-action">
+        <button class="btn-pay" id="add-user-btn" ${addingUser ? "disabled" : ""}>${addingUser ? "Adding…" : "Add user"}</button>
+      </td>
+    </tr>
+    </table></div>`;
+
+  html += `
+    <h2 class="settings-heading">Cycle schedule</h2>
+    <div class="settings-intro"><p>Cycles are derived from this config, so changes apply to all dates at once. Cycle 0 is a one-off period that ends at the anchor; cycle 1 starts at the anchor. The schedule lists day-counts for cycles 1, 2, 3, … and the last entry repeats forever (e.g. <code>7, 14</code> means weekly until the 14-day cycles kick in).</p></div>
+    <div class="table-wrap"><table class="raid-table settings-table cycle-settings-table">
+      <tbody>
+        <tr>
+          <td class="settings-label">Anchor date<span class="settings-hint">cycle 1 starts here</span></td>
+          <td><input class="settings-input settings-date" type="date" id="cfg-anchor" value="${escapeHtml(cycleConfig.anchor)}"></td>
+        </tr>
+        <tr>
+          <td class="settings-label">Cycle 0 duration<span class="settings-hint">days before the anchor</span></td>
+          <td><input class="settings-input" type="number" min="0" id="cfg-cycle-0" value="${cycleConfig.cycle_0_days}"></td>
+        </tr>
+        <tr>
+          <td class="settings-label">Schedule<span class="settings-hint">day-counts, comma-separated; last repeats</span></td>
+          <td><input class="settings-input settings-schedule" type="text" id="cfg-schedule" value="${escapeHtml(cycleConfig.schedule.join(", "))}" placeholder="7, 7, 14"></td>
+        </tr>
+        <tr>
+          <td class="settings-label">Payout window<span class="settings-hint">days after a cycle ends that payouts stay valid</span></td>
+          <td><input class="settings-input" type="number" min="0" id="cfg-window" value="${cycleConfig.payout_window_days}"></td>
+        </tr>
+      </tbody>
+      <tr class="form-footer-row">
+        <td colspan="2" class="form-footer-cell">
+          <button class="btn-pay settings-save" id="cycle-config-save" ${savingCycleConfig ? "disabled" : ""}>${savingCycleConfig ? "Saving…" : "Save cycle config"}</button>
+        </td>
+      </tr>
+    </table></div>
+  `;
+
+  if (cycles && cycles.length > 0) {
+    html += `
+      <h2 class="settings-heading">Derived cycles</h2>
+      <div class="table-wrap"><table class="raid-table settings-table">
+        <thead>
+          <tr>
+            <th>Cycle</th>
+            <th>Dates</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cycles.map((c) => `
+            <tr>
+              <td class="overview-cell">Cycle ${c.index}</td>
+              <td>${fmtDay(c.start_date)} – ${fmtDay(c.display_end)}</td>
+              <td>${c.is_current ? "current" : c.is_over ? "payout window closed" : `payouts valid until ${fmtDay(c.payout_deadline.slice(0, 10))}`}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table></div>
+    `;
+  }
+
   $el.innerHTML = html;
+
+  document.getElementById("add-user-btn")?.addEventListener("click", async () => {
+    const $id = document.getElementById("new-user-id") as HTMLInputElement | null;
+    const $name = document.getElementById("new-user-name") as HTMLInputElement | null;
+    const $admin = document.getElementById("new-user-admin") as HTMLInputElement | null;
+    if (!$id || !$name || !$admin) return;
+    const discordId = $id.value.trim();
+    if (!discordId) {
+      showToast("Discord ID is required");
+      return;
+    }
+    addingUser = true;
+    renderSettings($el, $status);
+    try {
+      await createUser({
+        discord_id: discordId,
+        username: $name.value.trim() || discordId,
+        is_admin: $admin.checked,
+      });
+      usersData = await fetchUsers();
+      showToast("User added");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "error";
+      showToast(`Failed to add user: ${msg}`);
+    }
+    addingUser = false;
+    renderSettings($el, $status);
+  });
+
+  document.querySelectorAll("[data-remove]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const discordId = (btn as HTMLElement).dataset.remove!;
+      if (confirmingRemoveId !== discordId) {
+        confirmingRemoveId = discordId;
+        renderSettings($el, $status);
+        return;
+      }
+      confirmingRemoveId = null;
+      removingUserId = discordId;
+      renderSettings($el, $status);
+      try {
+        await removeUser(discordId);
+        usersData = await fetchUsers();
+        showToast("User removed");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "error";
+        showToast(`Failed to remove user: ${msg}`);
+      }
+      removingUserId = null;
+      renderSettings($el, $status);
+    });
+  });
+
+  document.getElementById("cycle-config-save")?.addEventListener("click", async () => {
+    const $anchor = document.getElementById("cfg-anchor") as HTMLInputElement | null;
+    const $c0 = document.getElementById("cfg-cycle-0") as HTMLInputElement | null;
+    const $sched = document.getElementById("cfg-schedule") as HTMLInputElement | null;
+    const $win = document.getElementById("cfg-window") as HTMLInputElement | null;
+    if (!$anchor || !$c0 || !$sched || !$win) return;
+
+    const schedule = $sched.value
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map(Number);
+    if (schedule.length === 0 || schedule.some((n) => !Number.isInteger(n) || n <= 0)) {
+      showToast("Schedule must be a comma-separated list of positive day counts");
+      return;
+    }
+    if (!$anchor.value) {
+      showToast("Anchor date is required");
+      return;
+    }
+
+    savingCycleConfig = true;
+    renderSettings($el, $status);
+    try {
+      cycleConfig = await updateCycleConfig({
+        anchor: $anchor.value,
+        cycle_0_days: Math.max(0, Math.floor(Number($c0.value) || 0)),
+        schedule,
+        payout_window_days: Math.max(0, Math.floor(Number($win.value) || 0)),
+      });
+      savingCycleConfig = false;
+      cycles = null;
+      selectedCycleIndex = null;
+      await fetchData();
+      showToast("Cycle config saved");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "error";
+      savingCycleConfig = false;
+      renderSettings($el, $status);
+      showToast(`Failed to save cycle config: ${msg}`);
+    }
+  });
 
   document.querySelectorAll(".settings-save").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -984,12 +1365,24 @@ async function fetchData() {
   }
 
   isFetching = true;
-  fetchError = null;
-  render();
+  if (!loadedOnce) {
+    fetchError = null;
+    render();
+  }
 
   try {
     if (rewardDefs === null) {
       rewardDefs = await fetchRewardDefinitions();
+    }
+    if (currentUser?.is_admin && cycleConfig === null) {
+      cycleConfig = await fetchCycleConfig();
+    }
+    if (currentUser?.is_admin && usersData === null) {
+      usersData = await fetchUsers();
+    }
+    if (cycles === null) {
+      cycles = await fetchCycles();
+      selectedCycle();
     }
     if (currentView === "rewards") {
       await loadSummary();
@@ -997,17 +1390,22 @@ async function fetchData() {
     payoutsData = await fetchPayoutRecords();
     statusData = await fetchServerStatus();
     fetchError = null;
+    loadedOnce = true;
   } catch (err) {
     if (!isAuthenticated()) {
       currentUser = null;
     }
     const msg = err instanceof Error ? err.message : "An error occurred";
     fetchError = msg;
-    showToast(`Failed to load data: ${msg}`);
+    if (!loadedOnce) {
+      showToast(`Failed to load data: ${msg}`);
+    }
   }
 
   isFetching = false;
-  render();
+  if (payModalMember === null) {
+    render();
+  }
 }
 
 // ── Init ───────────────────────────────────────────────────────
@@ -1033,6 +1431,11 @@ async function init() {
     render();
     fetchData();
     setInterval(fetchData, 60000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        fetchData();
+      }
+    });
   } else {
     render();
   }

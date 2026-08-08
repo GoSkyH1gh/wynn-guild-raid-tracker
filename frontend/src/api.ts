@@ -48,6 +48,26 @@ export interface RewardDay {
   entries: RewardDayEntry[];
 }
 
+export interface Cycle {
+  index: number;
+  start: string;
+  end: string;
+  start_date: string;
+  end_date: string;
+  display_end: string;
+  payout_deadline: string;
+  is_current: boolean;
+  is_over: boolean;
+  has_data: boolean;
+}
+
+export interface CycleConfig {
+  anchor: string;
+  cycle_0_days: number;
+  schedule: number[];
+  payout_window_days: number;
+}
+
 export interface PayoutChunk {
   day: string;
   member_uuid: string;
@@ -121,6 +141,10 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error("Not authenticated");
   }
 
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
@@ -142,6 +166,36 @@ export interface CurrentUser {
 
 export async function fetchCurrentUser(): Promise<CurrentUser> {
   return fetchJson<CurrentUser>("/api/auth/me");
+}
+
+export interface DiscordUser {
+  discord_id: string;
+  username: string;
+  avatar_url: string | null;
+  is_admin: boolean;
+  created_at: string;
+  last_login: string;
+}
+
+export async function fetchUsers(): Promise<DiscordUser[]> {
+  return fetchJson<DiscordUser[]>("/api/auth/users");
+}
+
+export async function createUser(body: {
+  discord_id: string;
+  username: string;
+  is_admin: boolean;
+}): Promise<DiscordUser> {
+  return fetchJson<DiscordUser>("/api/auth/users", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function removeUser(discordId: string): Promise<void> {
+  return fetchJson<void>(`/api/auth/users/${encodeURIComponent(discordId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function fetchMembers(): Promise<GuildMember[]> {
@@ -182,6 +236,23 @@ export async function fetchRewardPerDay(
   let url = `/api/rewards/per-day?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   if (member_uuid) url += `&member_uuid=${member_uuid}`;
   return fetchJson<RewardDay[]>(url);
+}
+
+export async function fetchCycles(): Promise<Cycle[]> {
+  return fetchJson<Cycle[]>("/api/cycles");
+}
+
+export async function fetchCycleConfig(): Promise<CycleConfig> {
+  return fetchJson<CycleConfig>("/api/cycle-config");
+}
+
+export async function updateCycleConfig(
+  config: CycleConfig,
+): Promise<CycleConfig> {
+  return fetchJson<CycleConfig>("/api/cycle-config", {
+    method: "PUT",
+    body: JSON.stringify(config),
+  });
 }
 
 export async function createPayout(body: {

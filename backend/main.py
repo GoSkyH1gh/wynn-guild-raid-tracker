@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from dotenv import load_dotenv, find_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Query, Response, Request
@@ -25,10 +25,10 @@ from .auth import (
     delete_jwt_cookie,
     revoke_user_token,
 )
-from .database import AsyncSessionLocal, engine, verify_database_connection
-from .models import Base, DiscordUser, FetchLog, GuildMember, RaidSnapshot, RewardDefinition, PayoutRecord
+from .database import AsyncSessionLocal, engine, verify_database_connection, keep_database_warm
+from .models import Base, DiscordUser, FetchLog, GuildMember, RaidSnapshot, RewardDefinition, PayoutRecord, CycleConfig, DetectedCompletion
 from .schemas import (
-CurrentUserOut,
+    CurrentUserOut,
     DiscordUserOut,
     DiscordUserCreate,
     SetupRequest,
@@ -46,15 +46,20 @@ CurrentUserOut,
     VoidPayoutResult,
     ServerStatus,
     TriggerResult,
+    CycleOut,
+    CycleConfigOut,
+    CycleConfigUpdate,
 )
 from .tracker import (
     get_reward_summary,
     get_reward_per_day,
+    get_cycle_schedule,
     process_payout,
     list_payouts,
     _record_fetch_log,
     snapshot_guild,
 )
+from .cycles import CycleSchedule, cycle_for, list_cycles, validate_payout_range
 
 load_dotenv(find_dotenv())
 
@@ -71,6 +76,14 @@ DEFAULT_RAID_TYPES = [
     {"name": "tna", "display": "The Nameless Anomaly", "cap": 6},
     {"name": "wtp", "display": "The Wartorn Palace", "cap": 0},
 ]
+
+# Testing schedule: cycle 1 starts on the first day of fetches, then weekly.
+DEFAULT_CYCLE_CONFIG = {
+    "anchor": date(2026, 7, 27),
+    "cycle_0_days": 10,
+    "schedule": [7],
+    "payout_window_days": 7,
+}
 
 
 async def _seed_reward_definitions():
@@ -99,6 +112,15 @@ async def _seed_reward_definitions():
         await session.commit()
 
 
+async def _seed_cycle_config():
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(CycleConfig))
+        existing = result.scalar_one_or_none()
+        if existing is None:
+            session.add(CycleConfig(**DEFAULT_CYCLE_CONFIG))
+            await session.commit()
+
+
 async def _periodic_fetch():
     token = os.getenv("WYNN_TOKEN")
     guild_uuid = os.getenv("GUILD_UUID")
@@ -110,11 +132,12 @@ async def _periodic_fetch():
         started_at = datetime.now(timezone.utc)
         try:
             result = await snapshot_guild(token, guild_uuid)
+            completed_at = datetime.now(timezone.utc)
             error_message = None if result["status"] == "ok" else "API returned no data"
             await _record_fetch_log(
                 started_at,
                 result["status"],
-                result["timestamp"],
+                completed_at,
                 snapshot_count=result["snapshot_count"],
                 restricted_count=result["restricted_count"],
                 error_message=error_message,
@@ -140,6 +163,7 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
 
     await _seed_reward_definitions()
+    await _seed_cycle_config()
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(FetchLog).where(FetchLog.status == "running"))
@@ -151,8 +175,15 @@ async def lifespan(app: FastAPI):
 
     global _background_task
     _background_task = asyncio.create_task(_periodic_fetch())
+    _keepalive_task = asyncio.create_task(keep_database_warm())
 
     yield
+
+    _keepalive_task.cancel()
+    try:
+        await _keepalive_task
+    except asyncio.CancelledError:
+        pass
 
     if _background_task:
         _background_task.cancel()
@@ -368,11 +399,12 @@ async def trigger_fetch(current_user: dict = Depends(get_current_user)):
     started_at = datetime.now(timezone.utc)
     try:
         result = await snapshot_guild(token, guild_uuid)
+        completed_at = datetime.now(timezone.utc)
         if result["status"] == "error":
             await _record_fetch_log(
                 started_at,
                 "error",
-                result["timestamp"],
+                completed_at,
                 error_message="API returned no data",
             )
             raise HTTPException(status_code=502, detail="API fetch failed")
@@ -380,7 +412,7 @@ async def trigger_fetch(current_user: dict = Depends(get_current_user)):
         await _record_fetch_log(
             started_at,
             "ok",
-            result["timestamp"],
+            completed_at,
             snapshot_count=result["snapshot_count"],
             restricted_count=result["restricted_count"],
         )
@@ -484,6 +516,79 @@ async def update_reward_definition(
         return RewardDefinitionOut.model_validate(rd)
 
 
+@app.get("/api/cycles", response_model=list[CycleOut])
+async def get_cycles(current_user: dict = Depends(get_current_user)):
+    async with AsyncSessionLocal() as session:
+        schedule = await get_cycle_schedule(session)
+        now = datetime.now(timezone.utc)
+        cycles = list_cycles(schedule, now)
+
+        has_data_result = await session.execute(select(DetectedCompletion.detected_at))
+        cycles_with_data: set[int] = set()
+        for (detected_at,) in has_data_result.all():
+            cycles_with_data.add(cycle_for(detected_at, schedule).index)
+
+        return [
+            {
+                "index": c.index,
+                "start": c.start,
+                "end": c.end,
+                "start_date": c.start_date,
+                "end_date": c.end_date,
+                "display_end": c.display_end,
+                "payout_deadline": c.payout_deadline,
+                "is_current": c.is_current(now),
+                "is_over": c.is_over(now),
+                "has_data": c.index in cycles_with_data,
+            }
+            for c in cycles
+        ]
+
+
+@app.get("/api/cycle-config", response_model=CycleConfigOut)
+async def get_cycle_config(admin_user: dict = Depends(get_admin_user)):
+    async with AsyncSessionLocal() as session:
+        schedule = await get_cycle_schedule(session)
+        return {
+            "anchor": schedule.anchor,
+            "cycle_0_days": schedule.cycle_0_days,
+            "schedule": list(schedule.schedule),
+            "payout_window_days": schedule.payout_window_days,
+        }
+
+
+@app.put("/api/cycle-config", response_model=CycleConfigOut)
+async def update_cycle_config(
+    body: CycleConfigUpdate, admin_user: dict = Depends(get_admin_user)
+):
+    try:
+        CycleSchedule(
+            anchor=body.anchor,
+            cycle_0_days=body.cycle_0_days,
+            schedule=tuple(body.schedule),
+            payout_window_days=body.payout_window_days,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(CycleConfig))
+        row = result.scalar_one_or_none()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Cycle config not seeded")
+        row.anchor = body.anchor
+        row.cycle_0_days = body.cycle_0_days
+        row.schedule = body.schedule
+        row.payout_window_days = body.payout_window_days
+        await session.commit()
+        return {
+            "anchor": row.anchor,
+            "cycle_0_days": row.cycle_0_days,
+            "schedule": list(row.schedule),
+            "payout_window_days": row.payout_window_days,
+        }
+
+
 @app.get("/api/rewards/summary", response_model=list[RewardSummaryOut])
 async def get_rewards_summary(
     from_: datetime = Query(alias="from"),
@@ -507,16 +612,21 @@ async def get_rewards_per_day(
 
 
 @app.post("/api/rewards/payout", response_model=list[PayoutChunkOut])
-async def create_reward_payout(body: PayoutCreate, admin_user: dict = Depends(get_admin_user)):
+async def create_reward_payout(body: PayoutCreate, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
+        schedule = await get_cycle_schedule(session)
+        try:
+            validate_payout_range(body.starts_at, body.ends_at, schedule)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         try:
             return await process_payout(
                 session,
                 body.starts_at,
                 body.ends_at,
                 [item.model_dump() for item in body.items],
-                paid_by_discord_id=admin_user["discord_id"],
-                paid_by_username=admin_user["username"],
+                paid_by_discord_id=current_user["discord_id"],
+                paid_by_username=current_user["username"],
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -529,11 +639,15 @@ async def get_payouts(current_user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/payouts/{payout_id}/void", response_model=VoidPayoutResult)
-async def void_payout(payout_id: int, admin_user: dict = Depends(get_admin_user)):
+async def void_payout(payout_id: int, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         record = await session.get(PayoutRecord, payout_id)
         if record is None:
             raise HTTPException(status_code=404, detail="Payout record not found")
+        if not current_user["is_admin"] and record.paid_by_discord_id != current_user["discord_id"]:
+            raise HTTPException(
+                status_code=403, detail="You can only void your own payouts"
+            )
         await session.delete(record)
         await session.commit()
         return VoidPayoutResult(payout_id=payout_id, status="voided")

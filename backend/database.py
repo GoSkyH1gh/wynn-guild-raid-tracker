@@ -1,5 +1,6 @@
 """Async PostgreSQL setup shared by FastAPI routes and application startup."""
 
+import asyncio
 import os
 from collections.abc import AsyncGenerator
 
@@ -41,7 +42,6 @@ if not database_url:
 
 engine = create_async_engine(
     _async_database_url(database_url),
-    pool_pre_ping=True,
 )
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -61,3 +61,15 @@ async def verify_database_connection() -> None:
     """Raise an exception if a connection cannot be established."""
     async with engine.connect() as connection:
         await connection.execute(text("SELECT 1"))
+
+
+async def keep_database_warm() -> None:
+    """Ping the database periodically so Neon's scale-to-zero never suspends
+    the compute while the app is running, and drop dead pooled connections."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+        except Exception:
+            engine.dispose()

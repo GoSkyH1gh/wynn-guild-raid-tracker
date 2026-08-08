@@ -1,14 +1,23 @@
 import logging
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import httpx
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .cycles import CycleSchedule, day_bucket
 from .database import AsyncSessionLocal
-from .models import GuildMember, RaidSnapshot, DetectedCompletion, FetchLog, PayoutRecord, RewardDefinition
+from .models import (
+    GuildMember,
+    RaidSnapshot,
+    DetectedCompletion,
+    FetchLog,
+    PayoutRecord,
+    RewardDefinition,
+    CycleConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +28,6 @@ RAID_TYPES = ["notg", "nol", "tcc", "tna", "wtp"]
 
 # Ranks that earn payouts. Everyone else is tracked but never paid.
 REWARD_RANKS = {"recruit", "recruiter", "captain"}
-
-CAP_DAY_OFFSET_MINUTES = int(os.getenv("CAP_DAY_OFFSET_MINUTES", "0"))
-
-
-def day_bucket(ts: datetime) -> date:
-    """Bucket a detection timestamp into a payout day, shifted by the configured offset."""
-    return (ts + timedelta(minutes=CAP_DAY_OFFSET_MINUTES)).date()
 
 
 async def fetch_guild_data(token: str, guild_uuid: str) -> dict | None:
@@ -251,6 +253,20 @@ async def _detect_completions(session: AsyncSession, member_uuid: str, new_snaps
 
 
 # ── Reward / payout logic ───────────────────────────────────────
+
+
+async def get_cycle_schedule(session: AsyncSession) -> CycleSchedule:
+    """Load the persisted cycle schedule as a pure derivation config."""
+    result = await session.execute(select(CycleConfig))
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise RuntimeError("Cycle config is not seeded — restart the server")
+    return CycleSchedule(
+        anchor=row.anchor,
+        cycle_0_days=row.cycle_0_days,
+        schedule=tuple(row.schedule),
+        payout_window_days=row.payout_window_days,
+    )
 
 
 async def get_reward_summary(

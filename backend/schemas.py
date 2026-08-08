@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -50,6 +50,33 @@ class RewardDefinitionOut(BaseModel):
 class RewardDefinitionUpdate(BaseModel):
     display_name: str | None = None
     daily_cap: int | None = None
+
+
+class CycleOut(BaseModel):
+    index: int
+    start: datetime  # inclusive raw-UTC bound
+    end: datetime    # exclusive raw-UTC bound
+    start_date: date
+    end_date: date   # exclusive
+    display_end: date
+    payout_deadline: datetime
+    is_current: bool
+    is_over: bool
+    has_data: bool
+
+
+class CycleConfigOut(BaseModel):
+    anchor: date
+    cycle_0_days: int
+    schedule: list[int]
+    payout_window_days: int
+
+
+class CycleConfigUpdate(BaseModel):
+    anchor: date
+    cycle_0_days: int
+    schedule: list[int]
+    payout_window_days: int
 
 
 class DetectedCompletionOut(BaseModel):
