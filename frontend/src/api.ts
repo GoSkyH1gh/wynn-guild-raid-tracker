@@ -141,6 +141,10 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error("Not authenticated");
   }
 
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
@@ -162,6 +166,36 @@ export interface CurrentUser {
 
 export async function fetchCurrentUser(): Promise<CurrentUser> {
   return fetchJson<CurrentUser>("/api/auth/me");
+}
+
+export interface DiscordUser {
+  discord_id: string;
+  username: string;
+  avatar_url: string | null;
+  is_admin: boolean;
+  created_at: string;
+  last_login: string;
+}
+
+export async function fetchUsers(): Promise<DiscordUser[]> {
+  return fetchJson<DiscordUser[]>("/api/auth/users");
+}
+
+export async function createUser(body: {
+  discord_id: string;
+  username: string;
+  is_admin: boolean;
+}): Promise<DiscordUser> {
+  return fetchJson<DiscordUser>("/api/auth/users", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function removeUser(discordId: string): Promise<void> {
+  return fetchJson<void>(`/api/auth/users/${encodeURIComponent(discordId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function fetchMembers(): Promise<GuildMember[]> {

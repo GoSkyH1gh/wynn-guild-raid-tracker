@@ -1209,6 +1209,47 @@ tr.voiding td {
   padding: 0.75rem 0.25rem 0;
 }
 
+.add-user {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 0.25rem 0.25rem;
+}
+
+.add-user-id {
+  width: 12rem;
+}
+
+.add-user-name {
+  width: 12rem;
+}
+
+.add-user-admin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.add-user-admin input[type="checkbox"] {
+  accent-color: var(--accent-text);
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.user-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tag-admin {
+  color: var(--accent-text);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 .cycle-settings-table td:first-child {
   width: 1%;
 }

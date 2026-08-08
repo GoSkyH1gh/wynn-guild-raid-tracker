@@ -610,7 +610,7 @@ async def get_rewards_per_day(
 
 
 @app.post("/api/rewards/payout", response_model=list[PayoutChunkOut])
-async def create_reward_payout(body: PayoutCreate, admin_user: dict = Depends(get_admin_user)):
+async def create_reward_payout(body: PayoutCreate, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         try:
             return await process_payout(
@@ -618,8 +618,8 @@ async def create_reward_payout(body: PayoutCreate, admin_user: dict = Depends(ge
                 body.starts_at,
                 body.ends_at,
                 [item.model_dump() for item in body.items],
-                paid_by_discord_id=admin_user["discord_id"],
-                paid_by_username=admin_user["username"],
+                paid_by_discord_id=current_user["discord_id"],
+                paid_by_username=current_user["username"],
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -632,11 +632,15 @@ async def get_payouts(current_user: dict = Depends(get_current_user)):
 
 
 @app.post("/api/payouts/{payout_id}/void", response_model=VoidPayoutResult)
-async def void_payout(payout_id: int, admin_user: dict = Depends(get_admin_user)):
+async def void_payout(payout_id: int, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         record = await session.get(PayoutRecord, payout_id)
         if record is None:
             raise HTTPException(status_code=404, detail="Payout record not found")
+        if not current_user["is_admin"] and record.paid_by_discord_id != current_user["discord_id"]:
+            raise HTTPException(
+                status_code=403, detail="You can only void your own payouts"
+            )
         await session.delete(record)
         await session.commit()
         return VoidPayoutResult(payout_id=payout_id, status="voided")

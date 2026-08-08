@@ -12,6 +12,9 @@ import {
   voidPayoutRecord,
   fetchDiscordLoginUrl,
   fetchCurrentUser,
+  fetchUsers,
+  createUser,
+  removeUser,
   triggerFetch,
   setToken,
   clearToken,
@@ -23,6 +26,7 @@ import {
   type PayoutRecord,
   type ServerStatus,
   type CurrentUser,
+  type DiscordUser,
   type RewardDefinition,
   type Cycle,
   type CycleConfig,
@@ -95,6 +99,10 @@ let confirmingVoidId: number | null = null;
 let savingDefId: number | null = null;
 let cycleConfig: CycleConfig | null = null;
 let savingCycleConfig = false;
+let usersData: DiscordUser[] | null = null;
+let addingUser = false;
+let confirmingRemoveId: string | null = null;
+let removingUserId: string | null = null;
 let currentUser: CurrentUser | null = null;
 
 function now(): Date {
@@ -252,6 +260,7 @@ function render() {
       currentView = (btn as HTMLElement).dataset.view as View;
       expandedMember = null;
       confirmingVoidId = null;
+      confirmingRemoveId = null;
       const url = new URL(location.href);
       url.searchParams.set("view", currentView);
       history.replaceState(null, "", url.href);
@@ -651,7 +660,9 @@ async function loadSummary() {
 // ── Payouts view ───────────────────────────────────────────────
 
 function voidActionHtml(p: PayoutRecord): string {
-  if (!currentUser?.is_admin) return `<span class="text-muted-cell">—</span>`;
+  const canVoid =
+    currentUser?.is_admin || p.paid_by_discord_id === currentUser?.discord_id;
+  if (!canVoid) return `<span class="text-muted-cell">—</span>`;
   if (voidingPayoutId === p.id) {
     return `<button class="btn-pay btn-pay-busy" disabled><span class="btn-spinner"></span>Voiding…</button>`;
   }
@@ -850,6 +861,16 @@ function renderStatus($el: HTMLElement, $status: HTMLElement) {
 
 // ── Settings view ──────────────────────────────────────────────
 
+function removeUserButtonHtml(discordId: string): string {
+  if (removingUserId === discordId) {
+    return `<button class="btn-pay btn-pay-busy" disabled><span class="btn-spinner"></span>Removing…</button>`;
+  }
+  if (confirmingRemoveId === discordId) {
+    return `<button class="btn-pay btn-pay-confirm" data-remove="${escapeHtml(discordId)}">Confirm remove?</button>`;
+  }
+  return `<button class="btn-pay" data-remove="${escapeHtml(discordId)}">Remove</button>`;
+}
+
 function renderSettings($el: HTMLElement, $status: HTMLElement) {
   $status.innerHTML = `<span class="status-info">Reward settings</span>`;
 
@@ -864,6 +885,82 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
   }
 
   let html = `
+    <div class="settings-intro"><p>Daily caps per raid. Caps limit how many completions count toward a payout per member per day. Leave empty for unlimited.</p></div>
+    <div class="table-wrap"><table class="raid-table settings-table">
+      <thead>
+        <tr>
+          <th>Raid</th>
+          <th>Name</th>
+          <th>Daily cap</th>
+          <th class="col-action"></th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  for (const def of rewardDefs) {
+    const info = RAID_RUNES[def.raid_type];
+    const saving = savingDefId === def.id;
+    html += `<tr>
+      <td class="overview-cell">${info ? runeTag(info.rune, info.color) : escapeHtml(def.raid_type)}</td>
+      <td>${escapeHtml(def.display_name)}</td>
+      <td><input class="settings-input settings-cap" type="number" min="0" data-def="${def.id}" value="${def.daily_cap ?? ""}" placeholder="unlimited"></td>
+      <td class="col-action">
+        <button class="btn-pay settings-save" data-def="${def.id}" ${saving ? "disabled" : ""}>${saving ? "Saving…" : "Save"}</button>
+      </td>
+    </tr>`;
+  }
+
+  html += `</tbody></table></div>`;
+
+  html += `
+    <div class="settings-intro"><p>Authorized users. First-time logins from unknown Discord IDs are rejected. To add someone, enable Developer Mode in Discord, right-click their profile, and copy their User ID — the username fills in automatically on their first login.</p></div>
+    <div class="table-wrap"><table class="raid-table settings-table">
+      <thead>
+        <tr>
+          <th class="col-member">User</th>
+          <th>Role</th>
+          <th>Added</th>
+          <th>Last login</th>
+          <th class="col-action"></th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  if (usersData.length === 0) {
+    html += `<tr><td class="col-member" colspan="5"><span class="text-muted-cell">No users yet — add the first one below.</span></td></tr>`;
+  }
+
+  for (const u of usersData) {
+    const isSelf = u.discord_id === currentUser.discord_id;
+    html += `<tr>
+      <td class="col-member">
+        <span class="user-cell">
+          ${u.avatar_url
+            ? `<img class="user-avatar" src="${escapeHtml(u.avatar_url)}" alt="" width="24" height="24">`
+            : `<span class="user-avatar-fallback">${escapeHtml(u.username[0]?.toUpperCase() ?? "?")}</span>`}
+          <span class="member-name">${escapeHtml(u.username)}</span>
+          ${isSelf ? `<span class="text-muted-cell">(you)</span>` : ""}
+        </span>
+      </td>
+      <td>${u.is_admin ? `<span class="tag-admin">admin</span>` : `<span class="text-muted-cell">member</span>`}</td>
+      <td>${fmtDate(u.created_at)}</td>
+      <td>${fmtAgo(u.last_login)}</td>
+      <td class="col-action">${isSelf ? `<span class="text-muted-cell">—</span>` : removeUserButtonHtml(u.discord_id)}</td>
+    </tr>`;
+  }
+
+  html += `</tbody></table>
+    <div class="add-user">
+      <input class="settings-input add-user-id" type="text" id="new-user-id" placeholder="Discord ID" aria-label="Discord ID">
+      <input class="settings-input add-user-name" type="text" id="new-user-name" placeholder="Username (optional)" aria-label="Username (optional)">
+      <label class="add-user-admin" for="new-user-admin"><input type="checkbox" id="new-user-admin"><span class="settings-label">Admin</span></label>
+      <button class="btn-pay" id="add-user-btn" ${addingUser ? "disabled" : ""}>${addingUser ? "Adding…" : "Add user"}</button>
+    </div>
+  </div>`;
+
+  html += `
     <div class="settings-intro"><p>Cycle schedule — cycles are derived from this config, so changes apply to all dates at once. Cycle 0 is a one-off period that ends at the anchor; cycle 1 starts at the anchor. The schedule lists day-counts for cycles 1, 2, 3, … and the last entry repeats forever (e.g. <code>7, 14</code> means weekly until the 14-day cycles kick in).</p></div>
     <div class="table-wrap"><table class="raid-table settings-table cycle-settings-table">
       <tbody>
@@ -913,35 +1010,59 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
     `;
   }
 
-  html += `
-    <div class="settings-intro"><p>Daily caps per raid. Caps limit how many completions count toward a payout per member per day. Leave empty for unlimited.</p></div>
-    <div class="table-wrap"><table class="raid-table settings-table">
-      <thead>
-        <tr>
-          <th>Raid</th>
-          <th>Name</th>
-          <th>Daily cap</th>
-          <th class="col-action"></th>
-        </tr>
-      </thead>
-      <tbody>
-  `;
-
-  for (const def of rewardDefs) {
-    const info = RAID_RUNES[def.raid_type];
-    const saving = savingDefId === def.id;
-    html += `<tr>
-      <td class="overview-cell">${info ? runeTag(info.rune, info.color) : escapeHtml(def.raid_type)}</td>
-      <td>${escapeHtml(def.display_name)}</td>
-      <td><input class="settings-input settings-cap" type="number" min="0" data-def="${def.id}" value="${def.daily_cap ?? ""}" placeholder="unlimited"></td>
-      <td class="col-action">
-        <button class="btn-pay settings-save" data-def="${def.id}" ${saving ? "disabled" : ""}>${saving ? "Saving…" : "Save"}</button>
-      </td>
-    </tr>`;
-  }
-
-  html += `</tbody></table></div>`;
   $el.innerHTML = html;
+
+  document.getElementById("add-user-btn")?.addEventListener("click", async () => {
+    const $id = document.getElementById("new-user-id") as HTMLInputElement | null;
+    const $name = document.getElementById("new-user-name") as HTMLInputElement | null;
+    const $admin = document.getElementById("new-user-admin") as HTMLInputElement | null;
+    if (!$id || !$name || !$admin) return;
+    const discordId = $id.value.trim();
+    if (!discordId) {
+      showToast("Discord ID is required");
+      return;
+    }
+    addingUser = true;
+    renderSettings($el, $status);
+    try {
+      await createUser({
+        discord_id: discordId,
+        username: $name.value.trim() || discordId,
+        is_admin: $admin.checked,
+      });
+      usersData = await fetchUsers();
+      showToast("User added");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "error";
+      showToast(`Failed to add user: ${msg}`);
+    }
+    addingUser = false;
+    renderSettings($el, $status);
+  });
+
+  document.querySelectorAll("[data-remove]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const discordId = (btn as HTMLElement).dataset.remove!;
+      if (confirmingRemoveId !== discordId) {
+        confirmingRemoveId = discordId;
+        renderSettings($el, $status);
+        return;
+      }
+      confirmingRemoveId = null;
+      removingUserId = discordId;
+      renderSettings($el, $status);
+      try {
+        await removeUser(discordId);
+        usersData = await fetchUsers();
+        showToast("User removed");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "error";
+        showToast(`Failed to remove user: ${msg}`);
+      }
+      removingUserId = null;
+      renderSettings($el, $status);
+    });
+  });
 
   document.getElementById("cycle-config-save")?.addEventListener("click", async () => {
     const $anchor = document.getElementById("cfg-anchor") as HTMLInputElement | null;
@@ -1077,6 +1198,9 @@ async function fetchData() {
     }
     if (currentUser?.is_admin && cycleConfig === null) {
       cycleConfig = await fetchCycleConfig();
+    }
+    if (currentUser?.is_admin && usersData === null) {
+      usersData = await fetchUsers();
     }
     if (cycles === null) {
       cycles = await fetchCycles();
