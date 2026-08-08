@@ -98,6 +98,8 @@ let perDayLoading = new Set<string>();
 let voidingPayoutId: number | null = null;
 let payingMember: string | null = null;
 let payModalMember: string | null = null;
+let payTriggerUuid: string | null = null;
+let summaryCycleIndex: number | null = null;
 let confirmingVoidId: number | null = null;
 let savingDefId: number | null = null;
 let cycleConfig: CycleConfig | null = null;
@@ -338,9 +340,17 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
   const cycle = selectedCycle();
   const cycleText = cycle ? cycleStatusText(cycle) : "";
 
-  if (isFetching && !loadedOnce) {
+  const summaryStale = summaryCycleIndex !== selectedCycleIndex;
+  if ((isFetching && !loadedOnce) || (summaryStale && !fetchError)) {
     $status.innerHTML = `<span class="status-info">${escapeHtml(cycleText)}</span>`;
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading rewards…</p></div>`;
+    return;
+  }
+
+  if (summaryStale && fetchError) {
+    $status.innerHTML = `<span class="status-info">${escapeHtml(cycleText)}</span>`;
+    $el.innerHTML = `<div class="error-state"><p>Failed to load rewards</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
+    document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
     return;
   }
 
@@ -458,6 +468,7 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
       toggle();
     });
     row.addEventListener("keydown", (e) => {
+      if ((e.target as HTMLElement).closest("[data-pay-open]")) return;
       const ke = e as KeyboardEvent;
       if (ke.key === "Enter" || ke.key === " ") {
         e.preventDefault();
@@ -469,7 +480,8 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
   document.querySelectorAll("[data-pay-open]").forEach((btn) =>
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      payModalMember = (e.currentTarget as HTMLElement).dataset.payOpen!;
+      payTriggerUuid = (e.currentTarget as HTMLElement).dataset.payOpen!;
+      payModalMember = payTriggerUuid;
       renderRewards($el, $status);
     })
   );
@@ -515,17 +527,44 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
     updateModal();
 
     const closeModal = () => {
+      const uuid = payTriggerUuid;
       payModalMember = null;
-      document.removeEventListener("keydown", onEsc);
+      document.removeEventListener("keydown", onModalKeydown);
       renderRewards($el, $status);
+      if (uuid) {
+        document.querySelector<HTMLElement>(`[data-pay-open="${uuid}"]`)?.focus();
+      }
+      payTriggerUuid = null;
     };
 
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && payModalMember !== null && currentView === "rewards") {
+    const onModalKeydown = (e: KeyboardEvent) => {
+      if (payModalMember === null || currentView !== "rewards") return;
+      if (e.key === "Escape") {
+        e.preventDefault();
         closeModal();
+        return;
+      }
+      if (e.key === "Tab" && $overlay) {
+        const focusables = [
+          ...$overlay.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+          ),
+        ].filter((el) => el.offsetParent !== null);
+        if (focusables.length === 0) return;
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
+        const active = document.activeElement;
+        const inside = (el: Element | null): boolean => el !== null && $overlay.contains(el);
+        if (e.shiftKey && (active === first || !inside(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && (active === last || !inside(active))) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
-    document.addEventListener("keydown", onEsc);
+    document.addEventListener("keydown", onModalKeydown);
 
     $overlay?.addEventListener("pointerdown", (e) => {
       if (e.target === $overlay) closeModal();
@@ -542,8 +581,10 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
         }))
         .filter((it) => it.count > 0);
       payModalMember = null;
-      document.removeEventListener("keydown", onEsc);
+      document.removeEventListener("keydown", onModalKeydown);
       await performPayout(uuid, items);
+      document.querySelector<HTMLElement>(`[data-pay-open="${uuid}"]`)?.focus();
+      payTriggerUuid = null;
     });
   }
 }
@@ -568,6 +609,7 @@ function capCellHtml(p: {
 
 function payoutModalHtml(): string {
   if (!payModalMember) return "";
+  if (selectedCycle()?.is_over) return "";
   const rows = (summaryData ?? []).filter(
     (r) => r.member_uuid === payModalMember && r.pending > 0 && r.is_eligible,
   );
@@ -575,9 +617,9 @@ function payoutModalHtml(): string {
   const total = rows.reduce((s, r) => s + r.pending, 0);
   return `
     <div class="modal-overlay" id="pay-modal">
-      <div class="modal-card" role="dialog" aria-modal="true" aria-label="Pay out runes">
-        <h2 class="modal-title">Pay out — ${escapeHtml(rows[0]!.username)}</h2>
-        <p class="modal-hint">Set how many runes to pay per raid. Leave 0 to skip a raid.</p>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="pay-modal-title" aria-describedby="pay-modal-hint">
+        <h2 class="modal-title" id="pay-modal-title">Pay out — ${escapeHtml(rows[0]!.username)}</h2>
+        <p class="modal-hint" id="pay-modal-hint">Set how many runes to pay per raid. Leave 0 to skip a raid.</p>
         <div class="modal-rows">
           ${rows
             .map((r) => {
@@ -591,7 +633,7 @@ function payoutModalHtml(): string {
             })
             .join("")}
         </div>
-        <p class="pay-error" id="pay-error" hidden></p>
+        <p class="pay-error" id="pay-error" role="alert" hidden></p>
         <div class="modal-total"><span>Total</span><span id="pay-total">${total}</span></div>
         <div class="modal-actions">
           <button class="btn-logout" id="pay-cancel">Cancel</button>
@@ -608,6 +650,7 @@ function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
   const pending = rows.reduce((s, r) => s + r.pending, 0);
   const expanded = expandedMember === uuid;
   const paying = payingMember === uuid;
+  const cycleOver = selectedCycle()?.is_over ?? false;
 
   let html = `<tr class="member-row ${expanded ? "selected" : ""}${eligible ? "" : " ineligible"}" data-member="${escapeHtml(uuid)}" tabindex="0">
     <td class="col-member"><span class="member-name">${escapeHtml(first.username)}</span></td>
@@ -622,9 +665,9 @@ function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
     }).join("")}
     <td><span class="total-runes">${pending}</span></td>
     <td class="col-action">
-      ${eligible && pending > 0
-        ? `<button class="btn-pay" data-pay-open="${escapeHtml(uuid)}" ${paying ? "disabled" : ""}>${paying ? "Paying…" : `Pay ${pending}`}</button>`
-        : `<span class="text-muted-cell">${eligible ? "—" : "no payout"}</span>`}
+      ${eligible && pending > 0 && !cycleOver
+        ? `<button class="btn-pay" data-pay-open="${escapeHtml(uuid)}" aria-haspopup="dialog" ${paying ? "disabled" : ""}>${paying ? "Paying…" : `Pay ${pending}`}</button>`
+        : `<span class="text-muted-cell">${eligible ? (cycleOver ? "closed" : "—") : "no payout"}</span>`}
     </td>
   </tr>`;
 
@@ -747,6 +790,10 @@ async function performPayout(
     showToast("No cycle selected");
     return;
   }
+  if (cycle.is_over) {
+    showToast("This cycle's payout window has closed");
+    return;
+  }
 
   payingMember = uuid;
   render();
@@ -772,6 +819,7 @@ async function loadSummary() {
   if (!cycle) return;
   const { from, to } = cycleFromTo(cycle);
   summaryData = await fetchRewardSummary(fmtISO(from), fmtISO(to));
+  summaryCycleIndex = selectedCycleIndex;
 }
 
 // ── Payouts view ───────────────────────────────────────────────

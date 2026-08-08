@@ -8,6 +8,7 @@ from backend.cycles import (
     cycle_for_index,
     day_bucket,
     list_cycles,
+    validate_payout_range,
 )
 
 UTC = timezone.utc
@@ -133,6 +134,34 @@ def test_config_validation():
         cfg(cycle_0_days=-1)
     with pytest.raises(ValueError):
         cfg(payout_window_days=-1)
+
+
+def test_validate_payout_range_accepts_open_cycle():
+    c = cfg()
+    cycle = validate_payout_range(
+        dt(2026, 7, 27, 10), dt(2026, 8, 3, 0, 0), c, now=dt(2026, 8, 5)
+    )
+    assert cycle.index == 1
+
+
+def test_validate_payout_range_rejects_spanning_cycles():
+    c = cfg()
+    with pytest.raises(ValueError, match="spans multiple cycles"):
+        validate_payout_range(dt(2026, 7, 27), dt(2026, 8, 5), c, now=dt(2026, 8, 5))
+
+
+def test_validate_payout_range_rejects_closed_window():
+    c = cfg()
+    with pytest.raises(ValueError, match="closed"):
+        validate_payout_range(dt(2026, 7, 27), dt(2026, 8, 3, 0, 0), c, now=dt(2026, 8, 11))
+    validate_payout_range(dt(2026, 7, 27), dt(2026, 8, 3, 0, 0), c, now=dt(2026, 8, 10, 0, 0))
+
+
+def test_validate_payout_range_accepts_current_cycle_to_now():
+    c = cfg()
+    now = dt(2026, 8, 5, 18, 30)
+    cycle = validate_payout_range(dt(2026, 8, 3), now, c, now=now)
+    assert cycle.index == 2
 
 
 def test_user_test_scenario():

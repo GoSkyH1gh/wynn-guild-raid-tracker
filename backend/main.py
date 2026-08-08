@@ -59,7 +59,7 @@ from .tracker import (
     _record_fetch_log,
     snapshot_guild,
 )
-from .cycles import CycleSchedule, cycle_for, list_cycles
+from .cycles import CycleSchedule, cycle_for, list_cycles, validate_payout_range
 
 load_dotenv(find_dotenv())
 
@@ -614,6 +614,11 @@ async def get_rewards_per_day(
 @app.post("/api/rewards/payout", response_model=list[PayoutChunkOut])
 async def create_reward_payout(body: PayoutCreate, current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
+        schedule = await get_cycle_schedule(session)
+        try:
+            validate_payout_range(body.starts_at, body.ends_at, schedule)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         try:
             return await process_payout(
                 session,

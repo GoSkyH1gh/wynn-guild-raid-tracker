@@ -133,3 +133,20 @@ def list_cycles(config: CycleSchedule, now: datetime | None = None) -> list[Cycl
     """All cycles from 0 up to (and including) the one containing ``now``."""
     now = now or datetime.now(_UTC)
     return [cycle_for_index(i, config) for i in range(cycle_for(now, config).index + 1)]
+
+
+def validate_payout_range(
+    starts_at: datetime,
+    ends_at: datetime,
+    config: CycleSchedule,
+    now: datetime | None = None,
+) -> Cycle:
+    """Validate a payout range: it must fall within a single cycle whose
+    payout window is still open. Returns the cycle, or raises ValueError."""
+    now = now or datetime.now(_UTC)
+    cycle = cycle_for(starts_at, config)
+    if ends_at > cycle.end:
+        raise ValueError("payout range spans multiple cycles")
+    if cycle.is_over(now):
+        raise ValueError("payout window for this cycle has closed")
+    return cycle
