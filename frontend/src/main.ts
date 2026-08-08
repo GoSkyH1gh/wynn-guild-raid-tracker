@@ -28,6 +28,7 @@ import {
   type CycleConfig,
   RAID_RUNES,
 } from "./api.js";
+import { mountCyclePicker, type CyclePickerOption } from "./cycle-picker.js";
 
 type View = "rewards" | "payouts" | "status" | "settings";
 
@@ -119,13 +120,6 @@ function payoutBounds(c: Cycle): { from: Date; to: Date } {
   return cycleFromTo(c);
 }
 
-function cycleLabel(c: Cycle): string {
-  const span = `Cycle ${c.index} · ${fmtDay(c.start_date)} – ${fmtDay(c.display_end)}`;
-  if (c.is_current) return `${span} (current)`;
-  if (c.is_over) return `${span} (payout window closed)`;
-  return span;
-}
-
 function cycleStatusText(c: Cycle): string {
   const span = `Cycle ${c.index} · ${fmtDay(c.start_date)} – ${fmtDay(c.display_end)}`;
   if (c.is_current) return `${span} · ongoing`;
@@ -135,15 +129,18 @@ function cycleStatusText(c: Cycle): string {
     : `${span} · payouts valid until ${deadline}`;
 }
 
-function cycleOptionsHtml(): string {
-  const list = cycles ?? [];
-  return list
-    .map(
-      (c) =>
-        `<option value="${c.index}" ${c.index === selectedCycleIndex ? "selected" : ""}>${escapeHtml(cycleLabel(c))}</option>`,
-    )
-    .join("");
+function cycleOptions(): CyclePickerOption[] {
+  return (cycles ?? []).map((c) => ({
+    index: c.index,
+    title: `Cycle ${c.index}`,
+    dates: `${fmtDay(c.start_date)} – ${fmtDay(c.display_end)}`,
+    status: c.is_current ? "current" : c.is_over ? "closed" : "open",
+    hasData: c.has_data,
+    isSelected: c.index === selectedCycleIndex,
+  }));
 }
+
+let destroyPicker: (() => void) | null = null;
 
 function fmtISO(d: Date): string {
   return d.toISOString();
@@ -196,6 +193,9 @@ function render() {
     return;
   }
 
+  destroyPicker?.();
+  destroyPicker = null;
+
   const showCyclePicker = currentView === "rewards" && !!cycles && cycles.length > 0;
 
   const userHtml = currentUser
@@ -221,10 +221,7 @@ function render() {
       <div class="controls">
         <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("payouts")}${viewBtnHtml("status")}${currentUser?.is_admin ? viewBtnHtml("settings") : ""}</div>
         ${showCyclePicker
-          ? `<div class="cycle-group">
-               <label class="cycle-label" for="cycle-select">Cycle</label>
-               <select id="cycle-select" class="cycle-select">${cycleOptionsHtml()}</select>
-             </div>`
+          ? `<div class="cycle-picker-root" id="cycle-picker-root"></div>`
           : ""}
       </div>
 
@@ -263,15 +260,18 @@ function render() {
     })
   );
 
-  document.getElementById("cycle-select")?.addEventListener("change", (e) => {
-    selectedCycleIndex = Number((e.target as HTMLSelectElement).value);
-    expandedMember = null;
-    const url = new URL(location.href);
-    url.searchParams.set("cycle", String(selectedCycleIndex));
-    history.replaceState(null, "", url.href);
-    render();
-    fetchData();
-  });
+  const $pickerRoot = document.getElementById("cycle-picker-root");
+  if ($pickerRoot) {
+    destroyPicker = mountCyclePicker($pickerRoot, cycleOptions(), (index) => {
+      selectedCycleIndex = index;
+      expandedMember = null;
+      const url = new URL(location.href);
+      url.searchParams.set("cycle", String(index));
+      history.replaceState(null, "", url.href);
+      render();
+      fetchData();
+    });
+  }
 
   const $contentEl = document.getElementById("content")!;
   const $statusBarEl = document.getElementById("status-bar")!;
@@ -864,7 +864,7 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
   }
 
   let html = `
-    <div class="settings-intro"><p>Cycle schedule — cycles are derived from this config, so changes apply to all dates at once. Cycle 0 is a one-off bootstrap period that ends at the anchor; cycle 1 starts at the anchor. The schedule lists day-counts for cycles 1, 2, 3, … and the last entry repeats forever (e.g. <code>7, 14</code> means weekly until the 14-day cycles kick in).</p></div>
+    <div class="settings-intro"><p>Cycle schedule — cycles are derived from this config, so changes apply to all dates at once. Cycle 0 is a one-off period that ends at the anchor; cycle 1 starts at the anchor. The schedule lists day-counts for cycles 1, 2, 3, … and the last entry repeats forever (e.g. <code>7, 14</code> means weekly until the 14-day cycles kick in).</p></div>
     <div class="table-wrap"><table class="raid-table settings-table cycle-settings-table">
       <tbody>
         <tr>

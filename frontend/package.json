@@ -4,9 +4,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:picker": "esbuild test-cycle-picker.ts --bundle --platform=node --format=cjs --outfile=node_modules/.cache/test-cycle-picker.cjs && node node_modules/.cache/test-cycle-picker.cjs"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.1",
+    "happy-dom": "^20.11.1",
     "typescript": "^5.7.0",
     "vite": "^6.3.0"
   }

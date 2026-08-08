@@ -62,6 +62,7 @@ class CycleOut(BaseModel):
     payout_deadline: datetime
     is_current: bool
     is_over: bool
+    has_data: bool
 
 
 class CycleConfigOut(BaseModel):

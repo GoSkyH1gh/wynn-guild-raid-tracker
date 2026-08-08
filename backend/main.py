@@ -26,7 +26,7 @@ from .auth import (
     revoke_user_token,
 )
 from .database import AsyncSessionLocal, engine, verify_database_connection, keep_database_warm
-from .models import Base, DiscordUser, FetchLog, GuildMember, RaidSnapshot, RewardDefinition, PayoutRecord, CycleConfig
+from .models import Base, DiscordUser, FetchLog, GuildMember, RaidSnapshot, RewardDefinition, PayoutRecord, CycleConfig, DetectedCompletion
 from .schemas import (
     CurrentUserOut,
     DiscordUserOut,
@@ -59,7 +59,7 @@ from .tracker import (
     _record_fetch_log,
     snapshot_guild,
 )
-from .cycles import CycleSchedule, list_cycles
+from .cycles import CycleSchedule, cycle_for, list_cycles
 
 load_dotenv(find_dotenv())
 
@@ -519,6 +519,13 @@ async def get_cycles(current_user: dict = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
         schedule = await get_cycle_schedule(session)
         now = datetime.now(timezone.utc)
+        cycles = list_cycles(schedule, now)
+
+        has_data_result = await session.execute(select(DetectedCompletion.detected_at))
+        cycles_with_data: set[int] = set()
+        for (detected_at,) in has_data_result.all():
+            cycles_with_data.add(cycle_for(detected_at, schedule).index)
+
         return [
             {
                 "index": c.index,
@@ -530,8 +537,9 @@ async def get_cycles(current_user: dict = Depends(get_current_user)):
                 "payout_deadline": c.payout_deadline,
                 "is_current": c.is_current(now),
                 "is_over": c.is_over(now),
+                "has_data": c.index in cycles_with_data,
             }
-            for c in list_cycles(schedule, now)
+            for c in cycles
         ]
 
 

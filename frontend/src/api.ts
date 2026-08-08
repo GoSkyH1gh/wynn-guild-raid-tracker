@@ -58,6 +58,7 @@ export interface Cycle {
   payout_deadline: string;
   is_current: boolean;
   is_over: boolean;
+  has_data: boolean;
 }
 
 export interface CycleConfig {
