@@ -75,20 +75,19 @@ body {
   margin-bottom: 0.2rem;
 }
 
-.subtitle {
-  color: var(--text-dim);
-  font-size: 0.85rem;
-}
-
 /* ── Controls ────────────────────────────────── */
 
 .controls {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   margin-bottom: 1.5rem;
   justify-content: space-between;
+}
+
+.cycle-picker-root {
+  position: relative;
 }
 
 .view-toggle {
@@ -131,10 +130,6 @@ body {
 }
 
 /* ── Cycle picker (custom menu button) ────────── */
-
-.cycle-picker-root {
-  position: relative;
-}
 
 .cycle-picker {
   position: relative;
@@ -1130,6 +1125,116 @@ tr.voiding td {
   outline-offset: 2px;
 }
 
+/* ── Modal ───────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.55);
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 26rem;
+  padding: 1.25rem 1.5rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 14px 34px rgb(0 0 0 / 0.5);
+}
+
+.modal-title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+}
+
+.modal-hint {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-bottom: 0.75rem;
+}
+
+.pay-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.pay-row .rune-tag {
+  width: 2rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.pay-row-name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.pay-row-sub {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.raid-table td .rune-label {
+  display: block;
+  font-size: 0.6rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-top: 0.1rem;
+}
+
+.pay-row-pending {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.pay-input.invalid {
+  border-color: var(--rune-tcc);
+}
+
+.pay-input.invalid:focus {
+  border-color: var(--rune-tcc);
+}
+
+.pay-error {
+  color: var(--rune-tcc);
+  font-size: 0.7rem;
+  margin: 0.5rem 0 0;
+}
+
+.modal-total {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem 0 0.25rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
 /* ── Toast ────────────────────────────────────── */
 
 .toast {
@@ -1322,6 +1427,7 @@ tr.voiding td {
   .cycle-picker-root {
     display: flex;
     justify-content: center;
+    align-self: stretch;
   }
 
   .cp-trigger {

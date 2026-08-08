@@ -132,11 +132,12 @@ async def _periodic_fetch():
         started_at = datetime.now(timezone.utc)
         try:
             result = await snapshot_guild(token, guild_uuid)
+            completed_at = datetime.now(timezone.utc)
             error_message = None if result["status"] == "ok" else "API returned no data"
             await _record_fetch_log(
                 started_at,
                 result["status"],
-                result["timestamp"],
+                completed_at,
                 snapshot_count=result["snapshot_count"],
                 restricted_count=result["restricted_count"],
                 error_message=error_message,
@@ -398,11 +399,12 @@ async def trigger_fetch(current_user: dict = Depends(get_current_user)):
     started_at = datetime.now(timezone.utc)
     try:
         result = await snapshot_guild(token, guild_uuid)
+        completed_at = datetime.now(timezone.utc)
         if result["status"] == "error":
             await _record_fetch_log(
                 started_at,
                 "error",
-                result["timestamp"],
+                completed_at,
                 error_message="API returned no data",
             )
             raise HTTPException(status_code=502, detail="API fetch failed")
@@ -410,7 +412,7 @@ async def trigger_fetch(current_user: dict = Depends(get_current_user)):
         await _record_fetch_log(
             started_at,
             "ok",
-            result["timestamp"],
+            completed_at,
             snapshot_count=result["snapshot_count"],
             restricted_count=result["restricted_count"],
         )

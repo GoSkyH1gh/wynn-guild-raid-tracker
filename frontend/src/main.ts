@@ -31,6 +31,7 @@ import {
   type Cycle,
   type CycleConfig,
   RAID_RUNES,
+  RAID_LABELS,
 } from "./api.js";
 import { mountCyclePicker, type CyclePickerOption } from "./cycle-picker.js";
 
@@ -95,6 +96,7 @@ let perDayCache = new Map<string, RewardDay[] | null>();
 let perDayLoading = new Set<string>();
 let voidingPayoutId: number | null = null;
 let payingMember: string | null = null;
+let payModalMember: string | null = null;
 let confirmingVoidId: number | null = null;
 let savingDefId: number | null = null;
 let cycleConfig: CycleConfig | null = null;
@@ -222,7 +224,6 @@ function render() {
         <h1 class="title">Guild Raid&nbsp;Tracker</h1>
         ${userHtml}
       </div>
-      <p class="subtitle">Per-day completions · capped rune payouts</p>
     </header>
 
     <main class="main">
@@ -261,6 +262,7 @@ function render() {
       expandedMember = null;
       confirmingVoidId = null;
       confirmingRemoveId = null;
+      payModalMember = null;
       const url = new URL(location.href);
       url.searchParams.set("view", currentView);
       history.replaceState(null, "", url.href);
@@ -436,6 +438,7 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
     </tfoot>
   </table></div>`;
   $el.innerHTML = html;
+  $el.insertAdjacentHTML("beforeend", payoutModalHtml());
 
   document.querySelectorAll(".member-row").forEach((row) => {
     const toggle = () => {
@@ -450,7 +453,7 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
       }
     };
     row.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest("[data-pay]")) return;
+      if ((e.target as HTMLElement).closest("[data-pay-open]")) return;
       toggle();
     });
     row.addEventListener("keydown", (e) => {
@@ -462,13 +465,86 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
     });
   });
 
-  document.querySelectorAll(".btn-pay").forEach((btn) =>
+  document.querySelectorAll("[data-pay-open]").forEach((btn) =>
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const uuid = (e.currentTarget as HTMLElement).dataset.pay!;
-      void payMember(uuid);
+      payModalMember = (e.currentTarget as HTMLElement).dataset.payOpen!;
+      renderRewards($el, $status);
     })
   );
+
+  if (payModalMember) {
+    const $overlay = document.getElementById("pay-modal");
+    $overlay?.querySelector<HTMLInputElement>(".pay-input")?.focus();
+
+    const updateModal = () => {
+      const $total = document.getElementById("pay-total");
+      const $confirm = document.getElementById("pay-confirm") as HTMLButtonElement | null;
+      const $error = document.getElementById("pay-error");
+      let sum = 0;
+      let invalid = false;
+      let invalidMax = 0;
+      document.querySelectorAll<HTMLInputElement>(".pay-input").forEach((inp) => {
+        const max = Number(inp.max);
+        const raw = Number(inp.value);
+        const ok = Number.isInteger(raw) && raw >= 0 && raw <= max;
+        inp.classList.toggle("invalid", !ok);
+        inp.setAttribute("aria-invalid", String(!ok));
+        if (!ok) {
+          invalid = true;
+          invalidMax = Math.max(invalidMax, max);
+        } else {
+          sum += Math.max(0, raw);
+        }
+      });
+      if ($error) {
+        $error.textContent = invalid ? `Amounts must be whole numbers between 0 and ${invalidMax}` : "";
+        $error.hidden = !invalid;
+      }
+      if ($total) $total.textContent = String(sum);
+      if ($confirm) {
+        $confirm.textContent = sum > 0 ? `Pay ${sum} rune${sum === 1 ? "" : "s"}` : "Pay";
+        $confirm.disabled = invalid || sum === 0;
+      }
+    };
+
+    document.querySelectorAll<HTMLInputElement>(".pay-input").forEach((inp) =>
+      inp.addEventListener("input", updateModal)
+    );
+    updateModal();
+
+    const closeModal = () => {
+      payModalMember = null;
+      document.removeEventListener("keydown", onEsc);
+      renderRewards($el, $status);
+    };
+
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && payModalMember !== null && currentView === "rewards") {
+        closeModal();
+      }
+    };
+    document.addEventListener("keydown", onEsc);
+
+    $overlay?.addEventListener("pointerdown", (e) => {
+      if (e.target === $overlay) closeModal();
+    });
+    document.getElementById("pay-cancel")?.addEventListener("click", closeModal);
+    document.getElementById("pay-confirm")?.addEventListener("click", async () => {
+      const uuid = payModalMember;
+      if (!uuid) return;
+      const items = [...document.querySelectorAll<HTMLInputElement>(".pay-input")]
+        .map((inp) => ({
+          member_uuid: uuid,
+          raid_type: inp.dataset.raid!,
+          count: Math.max(0, Math.floor(Number(inp.value) || 0)),
+        }))
+        .filter((it) => it.count > 0);
+      payModalMember = null;
+      document.removeEventListener("keydown", onEsc);
+      await performPayout(uuid, items);
+    });
+  }
 }
 
 function capCellHtml(p: {
@@ -487,6 +563,41 @@ function capCellHtml(p: {
     content = `<span class="cell-payable">${p.pending}</span>${paid > 0 ? `<span class="cell-paid"> · ${paid} paid</span>` : ""}`;
   }
   return `<td class="overview-cell${over ? " over-limit-cell" : ""}">${content}${over ? `<span class="over-limit-badge">${overCount} over</span>` : ""}</td>`;
+}
+
+function payoutModalHtml(): string {
+  if (!payModalMember) return "";
+  const rows = (summaryData ?? []).filter(
+    (r) => r.member_uuid === payModalMember && r.pending > 0 && r.is_eligible,
+  );
+  if (rows.length === 0) return "";
+  const total = rows.reduce((s, r) => s + r.pending, 0);
+  return `
+    <div class="modal-overlay" id="pay-modal">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-label="Pay out runes">
+        <h2 class="modal-title">Pay out — ${escapeHtml(rows[0]!.username)}</h2>
+        <p class="modal-hint">Set how many runes to pay per raid. Leave 0 to skip a raid.</p>
+        <div class="modal-rows">
+          ${rows
+            .map((r) => {
+              const info = RAID_RUNES[r.raid_type]!;
+              return `<div class="pay-row">
+                ${runeTag(info.rune, info.color)}
+                <span class="pay-row-name">${escapeHtml(info.rune)}<span class="pay-row-sub">${escapeHtml(RAID_LABELS[r.raid_type] ?? r.raid_type)}</span></span>
+                <span class="pay-row-pending">${r.pending} pending</span>
+                <input class="settings-input pay-input" type="number" min="0" max="${r.pending}" value="${r.pending}" data-raid="${escapeHtml(r.raid_type)}" aria-label="${escapeHtml(RAID_LABELS[r.raid_type] ?? r.raid_type)} payout count">
+              </div>`;
+            })
+            .join("")}
+        </div>
+        <p class="pay-error" id="pay-error" hidden></p>
+        <div class="modal-total"><span>Total</span><span id="pay-total">${total}</span></div>
+        <div class="modal-actions">
+          <button class="btn-logout" id="pay-cancel">Cancel</button>
+          <button class="btn-pay" id="pay-confirm">Pay ${total} runes</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
@@ -511,7 +622,7 @@ function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
     <td><span class="total-runes">${pending}</span></td>
     <td class="col-action">
       ${eligible && pending > 0
-        ? `<button class="btn-pay" data-pay="${escapeHtml(uuid)}" ${paying ? "disabled" : ""}>${paying ? "Paying…" : `Pay ${pending}`}</button>`
+        ? `<button class="btn-pay" data-pay-open="${escapeHtml(uuid)}" ${paying ? "disabled" : ""}>${paying ? "Paying…" : `Pay ${pending}`}</button>`
         : `<span class="text-muted-cell">${eligible ? "—" : "no payout"}</span>`}
     </td>
   </tr>`;
@@ -621,14 +732,12 @@ async function loadPerDay(uuid: string) {
   render();
 }
 
-async function payMember(uuid: string) {
-  const rows = (summaryData ?? []).filter((r) => r.member_uuid === uuid);
-  const items = rows
-    .filter((r) => r.pending > 0 && r.is_eligible)
-    .map((r) => ({ member_uuid: uuid, raid_type: r.raid_type, count: r.pending }));
-
+async function performPayout(
+  uuid: string,
+  items: { member_uuid: string; raid_type: string; count: number }[],
+) {
   if (items.length === 0) {
-    showToast("Nothing pending for this player");
+    showToast("Nothing selected to pay out");
     return;
   }
 
@@ -722,7 +831,7 @@ function renderPayouts($el: HTMLElement, $status: HTMLElement) {
     html += `<tr class="${voidingPayoutId === p.id ? "voiding" : ""}">
       <td>${fmtDate(p.paid_at)}</td>
       <td class="col-member"><span class="member-name">${escapeHtml(p.member_username)}</span></td>
-      <td class="overview-cell">${runeTag(info.rune, info.color)}</td>
+      <td class="overview-cell">${runeTag(info.rune, info.color)}<span class="rune-label">${escapeHtml(p.raid_type)}</span></td>
       <td>${fmtDay(p.day)}</td>
       <td>${p.count_paid}</td>
       <td class="col-member">${p.paid_by_username ? escapeHtml(p.paid_by_username) : "—"}</td>
