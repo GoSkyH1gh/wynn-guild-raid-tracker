@@ -90,6 +90,7 @@ let payoutsData: PayoutRecord[] | null = null;
 let statusData: ServerStatus | null = null;
 let rewardDefs: RewardDefinition[] | null = null;
 let isFetching = false;
+let loadedOnce = false;
 let fetchError: string | null = null;
 let expandedMember: string | null = null;
 let perDayCache = new Map<string, RewardDay[] | null>();
@@ -337,7 +338,7 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
   const cycle = selectedCycle();
   const cycleText = cycle ? cycleStatusText(cycle) : "";
 
-  if (isFetching) {
+  if (isFetching && !loadedOnce) {
     $status.innerHTML = `<span class="status-info">${escapeHtml(cycleText)}</span>`;
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading rewards…</p></div>`;
     return;
@@ -791,7 +792,7 @@ function voidActionHtml(p: PayoutRecord): string {
 function renderPayouts($el: HTMLElement, $status: HTMLElement) {
   $status.innerHTML = `<span class="status-info">Payout history</span>`;
 
-  if (isFetching) {
+  if (isFetching && !loadedOnce) {
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading payouts…</p></div>`;
     return;
   }
@@ -884,7 +885,7 @@ async function handleVoid(payoutId: number) {
 function renderStatus($el: HTMLElement, $status: HTMLElement) {
   $status.innerHTML = `<span class="status-info">Server status</span>`;
 
-  if (isFetching) {
+  if (isFetching && !loadedOnce) {
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading status…</p></div>`;
     return;
   }
@@ -1316,8 +1317,10 @@ async function fetchData() {
   }
 
   isFetching = true;
-  fetchError = null;
-  render();
+  if (!loadedOnce) {
+    fetchError = null;
+    render();
+  }
 
   try {
     if (rewardDefs === null) {
@@ -1339,17 +1342,22 @@ async function fetchData() {
     payoutsData = await fetchPayoutRecords();
     statusData = await fetchServerStatus();
     fetchError = null;
+    loadedOnce = true;
   } catch (err) {
     if (!isAuthenticated()) {
       currentUser = null;
     }
     const msg = err instanceof Error ? err.message : "An error occurred";
     fetchError = msg;
-    showToast(`Failed to load data: ${msg}`);
+    if (!loadedOnce) {
+      showToast(`Failed to load data: ${msg}`);
+    }
   }
 
   isFetching = false;
-  render();
+  if (payModalMember === null) {
+    render();
+  }
 }
 
 // ── Init ───────────────────────────────────────────────────────
@@ -1375,6 +1383,11 @@ async function init() {
     render();
     fetchData();
     setInterval(fetchData, 60000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        fetchData();
+      }
+    });
   } else {
     render();
   }
