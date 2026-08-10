@@ -133,13 +133,15 @@ function payoutBounds(c: Cycle): { from: Date; to: Date } {
   return cycleFromTo(c);
 }
 
-function cycleStatusText(c: Cycle): string {
+function cycleStatusHtml(c: Cycle): string {
   const span = `Cycle ${c.index} · ${fmtDay(c.start_date)} – ${fmtDay(c.display_end)}`;
-  if (c.is_current) return `${span} · ongoing`;
+  if (c.is_current) {
+    return `${escapeHtml(span)} · ongoing · next cycle <span class="countdown" data-countdown="${escapeHtml(c.end)}"></span> (${escapeHtml(fmtDateTime(c.end))})`;
+  }
   const deadline = fmtDay(c.payout_deadline.slice(0, 10));
   return c.is_over
-    ? `${span} · payout window closed`
-    : `${span} · payouts valid until ${deadline}`;
+    ? `${escapeHtml(span)} · payout window closed`
+    : `${escapeHtml(span)} · payouts valid until ${escapeHtml(deadline)}`;
 }
 
 function cycleOptions(): CyclePickerOption[] {
@@ -150,6 +152,11 @@ function cycleOptions(): CyclePickerOption[] {
     status: c.is_current ? "current" : c.is_over ? "closed" : "open",
     hasData: c.has_data,
     isSelected: c.index === selectedCycleIndex,
+    endsIn: c.is_current
+      ? fmtRelUntil(c.end)
+      : c.is_over
+        ? null
+        : fmtRelUntil(c.payout_deadline),
   }));
 }
 
@@ -184,6 +191,59 @@ function fmtAgo(iso: string): string {
   const hrs = Math.floor(mins / 60);
   const rem = mins % 60;
   return rem > 0 ? `${hrs}h ${rem}m ago` : `${hrs}h ago`;
+}
+
+function fmtRelUntil(iso: string): string {
+  const diff = new Date(iso).getTime() - now().getTime();
+  if (diff <= 0) return "now";
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "in <1m";
+  if (mins < 60) return `in ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) {
+    const rem = mins % 60;
+    return rem > 0 ? `in ${hrs}h ${rem}m` : `in ${hrs}h`;
+  }
+  const days = Math.floor(hrs / 24);
+  const rem = hrs % 24;
+  return rem > 0 ? `in ${days}d ${rem}h` : `in ${days}d`;
+}
+
+function fmtDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function dayRolloverUtcLabel(offsetMinutes: number): string {
+  const utcMin = (((24 * 60 - offsetMinutes) % 1440) + 1440) % 1440;
+  const hh = String(Math.floor(utcMin / 60)).padStart(2, "0");
+  const mm = String(utcMin % 60).padStart(2, "0");
+  return `${hh}:${mm} UTC`;
+}
+
+function dayRolloverLocalLabel(offsetMinutes: number): string {
+  const utcMin = (((24 * 60 - offsetMinutes) % 1440) + 1440) % 1440;
+  const d = new Date();
+  const rolloverUtc = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), Math.floor(utcMin / 60), utcMin % 60),
+  );
+  return rolloverUtc.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}
+
+function currentDayOffsetMinutes(): number {
+  return cycles?.[0]?.day_offset_minutes ?? cycleConfig?.day_offset_minutes ?? 0;
+}
+
+function refreshCountdowns() {
+  document.querySelectorAll<HTMLElement>("[data-countdown]").forEach((el) => {
+    const until = el.dataset.countdown;
+    if (until) el.textContent = fmtRelUntil(until);
+  });
 }
 
 function capFor(raidType: string): number | null {
@@ -299,6 +359,8 @@ function render() {
   } else {
     renderStatus($contentEl, $statusBarEl);
   }
+
+  refreshCountdowns();
 }
 
 function renderLogin() {
@@ -338,17 +400,17 @@ function renderLogin() {
 
 function renderRewards($el: HTMLElement, $status: HTMLElement) {
   const cycle = selectedCycle();
-  const cycleText = cycle ? cycleStatusText(cycle) : "";
+  const cycleHtml = cycle ? cycleStatusHtml(cycle) : "";
 
   const summaryStale = summaryCycleIndex !== selectedCycleIndex;
   if ((isFetching && !loadedOnce) || (summaryStale && !fetchError)) {
-    $status.innerHTML = `<span class="status-info">${escapeHtml(cycleText)}</span>`;
+    $status.innerHTML = `<span class="status-info">${cycleHtml}</span>`;
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading rewards…</p></div>`;
     return;
   }
 
   if (summaryStale && fetchError) {
-    $status.innerHTML = `<span class="status-info">${escapeHtml(cycleText)}</span>`;
+    $status.innerHTML = `<span class="status-info">${cycleHtml}</span>`;
     $el.innerHTML = `<div class="error-state"><p>Failed to load rewards</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
     document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
     return;
@@ -356,7 +418,7 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
 
   if (summaryData === null) {
     if (fetchError) {
-      $status.innerHTML = `<span class="status-info">${escapeHtml(cycleText)}</span>`;
+      $status.innerHTML = `<span class="status-info">${cycleHtml}</span>`;
       $el.innerHTML = `<div class="error-state"><p>Failed to load rewards</p><p class="error-detail">${escapeHtml(fetchError)}</p><button class="btn-retry">Retry</button></div>`;
       document.querySelector(".btn-retry")?.addEventListener("click", () => fetchData(), { once: true });
       return;
@@ -384,7 +446,7 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
   const totalPending = eligibleMembers.reduce((s, entry) => s + totalOf(entry[1]), 0);
 
   $status.innerHTML = `
-    <span class="status-info">${escapeHtml(cycleText)}</span>
+    <span class="status-info">${cycleHtml}</span>
     <span class="status-summary">${members.length} players · ${totalPending} runs pending</span>
   `;
 
@@ -705,6 +767,7 @@ function renderDayBreakdown(uuid: string): string {
 
   let html = `<div class="legend">
     <span class="legend-item"><span class="legend-swatch" style="background: color-mix(in srgb, var(--rune-tcc) 22%, transparent)"></span> over daily cap</span>
+    <span class="legend-item legend-rollover">days roll over at ${dayRolloverUtcLabel(currentDayOffsetMinutes())}</span>
   </div>
   <div class="table-wrap"><table class="raid-table day-table">
     <colgroup>
@@ -1154,6 +1217,10 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
           <td class="settings-label">Payout window<span class="settings-hint">days after a cycle ends that payouts stay valid</span></td>
           <td><input class="settings-input" type="number" min="0" id="cfg-window" value="${cycleConfig.payout_window_days}"></td>
         </tr>
+        <tr>
+          <td class="settings-label">Payout day rollover<span class="settings-hint">when a payout day starts/ends · set via CAP_DAY_OFFSET_MINUTES env, restart to apply</span></td>
+          <td>${escapeHtml(dayRolloverUtcLabel(cycleConfig.day_offset_minutes))}<span class="text-muted-cell"> · ${escapeHtml(dayRolloverLocalLabel(cycleConfig.day_offset_minutes))} your time · offset ${cycleConfig.day_offset_minutes} min</span></td>
+        </tr>
       </tbody>
       <tr class="form-footer-row">
         <td colspan="2" class="form-footer-cell">
@@ -1431,6 +1498,7 @@ async function init() {
     render();
     fetchData();
     setInterval(fetchData, 60000);
+    setInterval(refreshCountdowns, 30000);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
         fetchData();

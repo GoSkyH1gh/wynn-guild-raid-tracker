@@ -205,6 +205,18 @@ body {
   letter-spacing: 0.02em;
 }
 
+.cp-ends-in {
+  font-size: 0.66rem;
+  min-height: 0.8rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 11rem;
+}
+
 .cp-dot {
   width: 0.5rem;
   height: 0.5rem;
@@ -378,6 +390,16 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.cp-item-ends-in {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 9rem;
+}
+
 .cp-item-status {
   font-weight: 500;
 }
@@ -419,6 +441,14 @@ body {
 
 .status-info {
   font-style: italic;
+}
+
+.status-info .countdown {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--accent-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .status-summary {
@@ -863,6 +893,10 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+.legend-rollover {
+  margin-left: auto;
 }
 
 .legend-swatch {

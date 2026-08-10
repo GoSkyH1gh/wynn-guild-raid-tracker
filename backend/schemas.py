@@ -63,6 +63,7 @@ class CycleOut(BaseModel):
     is_current: bool
     is_over: bool
     has_data: bool
+    day_offset_minutes: int  # env-configured payout-day offset
 
 
 class CycleConfigOut(BaseModel):
@@ -70,6 +71,7 @@ class CycleConfigOut(BaseModel):
     cycle_0_days: int
     schedule: list[int]
     payout_window_days: int
+    day_offset_minutes: int  # read-only; set via CAP_DAY_OFFSET_MINUTES env
 
 
 class CycleConfigUpdate(BaseModel):
