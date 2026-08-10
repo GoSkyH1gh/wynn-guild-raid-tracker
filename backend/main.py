@@ -59,7 +59,7 @@ from .tracker import (
     _record_fetch_log,
     snapshot_guild,
 )
-from .cycles import CycleSchedule, cycle_for, list_cycles, validate_payout_range
+from .cycles import CAP_DAY_OFFSET_MINUTES, CycleSchedule, cycle_for, list_cycles, validate_payout_range
 
 load_dotenv(find_dotenv())
 
@@ -540,6 +540,7 @@ async def get_cycles(current_user: dict = Depends(get_current_user)):
                 "is_current": c.is_current(now),
                 "is_over": c.is_over(now),
                 "has_data": c.index in cycles_with_data,
+                "day_offset_minutes": CAP_DAY_OFFSET_MINUTES,
             }
             for c in cycles
         ]
@@ -554,6 +555,7 @@ async def get_cycle_config(admin_user: dict = Depends(get_admin_user)):
             "cycle_0_days": schedule.cycle_0_days,
             "schedule": list(schedule.schedule),
             "payout_window_days": schedule.payout_window_days,
+            "day_offset_minutes": CAP_DAY_OFFSET_MINUTES,
         }
 
 
@@ -586,6 +588,7 @@ async def update_cycle_config(
             "cycle_0_days": row.cycle_0_days,
             "schedule": list(row.schedule),
             "payout_window_days": row.payout_window_days,
+            "day_offset_minutes": CAP_DAY_OFFSET_MINUTES,
         }
 
 

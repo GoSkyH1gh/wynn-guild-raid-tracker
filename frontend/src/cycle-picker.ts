@@ -7,15 +7,14 @@ export interface CyclePickerOption {
   status: CyclePickerStatus;
   hasData: boolean;
   isSelected: boolean;
+  endsIn?: string | null;
+}
+
+function endsInLabel(status: CyclePickerStatus, endsIn: string): string {
+  return status === "current" ? `ends in ${endsIn}` : `payout open for ${endsIn}`;
 }
 
 let pickerCounter = 0;
-
-const STATUS_LABEL: Record<CyclePickerStatus, string> = {
-  current: "ongoing",
-  open: "open",
-  closed: "closed",
-};
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => {
@@ -82,6 +81,7 @@ export function mountCyclePicker(
         <span class="cp-text">
           <span class="cp-title">${escapeHtml(selected?.title ?? "No cycles")}</span>
           <span class="cp-dates">${escapeHtml(selected?.dates ?? "")}</span>
+          <span class="cp-ends-in">${selected?.endsIn ? escapeHtml(endsInLabel(selected.status, selected.endsIn)) : ""}</span>
         </span>
         <span class="cp-dot" data-status="${selected?.status ?? "closed"}" aria-hidden="true"></span>
         <span class="cp-chevron" aria-hidden="true">▾</span>
@@ -100,7 +100,12 @@ export function mountCyclePicker(
               ${badge(String(o.index), "cp-item-badge")}
               <span class="cp-item-text">
                 <span class="cp-item-title">${escapeHtml(o.title)}</span>
-                <span class="cp-item-dates">${escapeHtml(o.dates)}${o.status !== "closed" ? `<span class="cp-item-status" data-status="${o.status}"> · ${STATUS_LABEL[o.status]}</span>` : ""}</span>
+                <span class="cp-item-dates">${escapeHtml(o.dates)}</span>
+                ${o.status === "current"
+                  ? `<span class="cp-item-ends-in"><span class="cp-item-status" data-status="current">ongoing</span> · ends in ${escapeHtml(o.endsIn ?? "")}</span>`
+                  : o.status === "open"
+                    ? `<span class="cp-item-ends-in"><span class="cp-item-status" data-status="open">payout open for ${escapeHtml(o.endsIn ?? "")}</span></span>`
+                    : ""}
               </span>
               <span class="cp-check" aria-hidden="true">✓</span>
             </div>`,

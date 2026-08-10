@@ -59,6 +59,7 @@ export interface Cycle {
   is_current: boolean;
   is_over: boolean;
   has_data: boolean;
+  day_offset_minutes: number;
 }
 
 export interface CycleConfig {
@@ -66,6 +67,7 @@ export interface CycleConfig {
   cycle_0_days: number;
   schedule: number[];
   payout_window_days: number;
+  day_offset_minutes: number;
 }
 
 export interface PayoutChunk {
@@ -247,7 +249,7 @@ export async function fetchCycleConfig(): Promise<CycleConfig> {
 }
 
 export async function updateCycleConfig(
-  config: CycleConfig,
+  config: Omit<CycleConfig, "day_offset_minutes">,
 ): Promise<CycleConfig> {
   return fetchJson<CycleConfig>("/api/cycle-config", {
     method: "PUT",
