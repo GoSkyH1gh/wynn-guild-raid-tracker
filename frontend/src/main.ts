@@ -127,10 +127,8 @@ function cycleFromTo(c: Cycle): { from: Date; to: Date } {
   return { from: new Date(c.start), to: new Date(c.end) };
 }
 
-function payoutBounds(c: Cycle): { from: Date; to: Date } {
-  // ongoing cycle: pay the runes detected so far (cycle start → now)
-  if (c.is_current) return { from: new Date(c.start), to: now() };
-  return cycleFromTo(c);
+function cyclePayoutable(c: Cycle | null): boolean {
+  return !!c && !c.is_current && !c.is_over;
 }
 
 function cycleStatusHtml(c: Cycle): string {
@@ -671,7 +669,7 @@ function capCellHtml(p: {
 
 function payoutModalHtml(): string {
   if (!payModalMember) return "";
-  if (selectedCycle()?.is_over) return "";
+  if (!cyclePayoutable(selectedCycle())) return "";
   const rows = (summaryData ?? []).filter(
     (r) => r.member_uuid === payModalMember && r.pending > 0 && r.is_eligible,
   );
@@ -712,7 +710,8 @@ function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
   const pending = rows.reduce((s, r) => s + r.pending, 0);
   const expanded = expandedMember === uuid;
   const paying = payingMember === uuid;
-  const cycleOver = selectedCycle()?.is_over ?? false;
+  const cycle = selectedCycle();
+  const payoutable = cyclePayoutable(cycle);
 
   let html = `<tr class="member-row ${expanded ? "selected" : ""}${eligible ? "" : " ineligible"}" data-member="${escapeHtml(uuid)}" tabindex="0">
     <td class="col-member"><span class="member-name">${escapeHtml(first.username)}</span></td>
@@ -727,9 +726,9 @@ function memberRowHtml(uuid: string, rows: RewardSummary[]): string {
     }).join("")}
     <td><span class="total-runes">${pending}</span></td>
     <td class="col-action">
-      ${eligible && pending > 0 && !cycleOver
+      ${eligible && pending > 0 && payoutable
         ? `<button class="btn-pay" data-pay-open="${escapeHtml(uuid)}" aria-haspopup="dialog" ${paying ? "disabled" : ""}>${paying ? "Paying…" : `Pay ${pending}`}</button>`
-        : `<span class="text-muted-cell">${eligible ? (cycleOver ? "closed" : "—") : "no payout"}</span>`}
+        : `<span class="text-muted-cell">${eligible ? (cycle?.is_current ? "ongoing" : cycle?.is_over ? "closed" : "—") : "no payout"}</span>`}
     </td>
   </tr>`;
 
@@ -853,6 +852,10 @@ async function performPayout(
     showToast("No cycle selected");
     return;
   }
+  if (cycle.is_current) {
+    showToast("This cycle is still active; payouts open once it ends");
+    return;
+  }
   if (cycle.is_over) {
     showToast("This cycle's payout window has closed");
     return;
@@ -861,7 +864,7 @@ async function performPayout(
   payingMember = uuid;
   render();
 
-  const { from, to } = payoutBounds(cycle);
+  const { from, to } = cycleFromTo(cycle);
   try {
     const result = await createPayout({ starts_at: fmtISO(from), ends_at: fmtISO(to), items });
     const total = result.reduce((s, c) => s + c.count_paid, 0);

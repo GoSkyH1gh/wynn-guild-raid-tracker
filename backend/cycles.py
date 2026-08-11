@@ -141,12 +141,15 @@ def validate_payout_range(
     config: CycleSchedule,
     now: datetime | None = None,
 ) -> Cycle:
-    """Validate a payout range: it must fall within a single cycle whose
-    payout window is still open. Returns the cycle, or raises ValueError."""
+    """Validate a payout range: it must fall within a single, ended cycle
+    whose payout window is still open. The currently active cycle is not
+    payoutable. Returns the cycle, or raises ValueError."""
     now = now or datetime.now(_UTC)
     cycle = cycle_for(starts_at, config)
     if ends_at > cycle.end:
         raise ValueError("payout range spans multiple cycles")
+    if cycle.is_current(now):
+        raise ValueError("payout for the current cycle is not allowed until it ends")
     if cycle.is_over(now):
         raise ValueError("payout window for this cycle has closed")
     return cycle
