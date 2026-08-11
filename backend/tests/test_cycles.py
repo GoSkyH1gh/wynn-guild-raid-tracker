@@ -157,11 +157,19 @@ def test_validate_payout_range_rejects_closed_window():
     validate_payout_range(dt(2026, 7, 27), dt(2026, 8, 3, 0, 0), c, now=dt(2026, 8, 10, 0, 0))
 
 
-def test_validate_payout_range_accepts_current_cycle_to_now():
+def test_validate_payout_range_rejects_current_cycle():
     c = cfg()
     now = dt(2026, 8, 5, 18, 30)
-    cycle = validate_payout_range(dt(2026, 8, 3), now, c, now=now)
-    assert cycle.index == 2
+    with pytest.raises(ValueError, match="current cycle"):
+        validate_payout_range(dt(2026, 8, 3), now, c, now=now)
+
+
+def test_validate_payout_range_rejects_current_cycle_partial_range():
+    c = cfg()
+    now = dt(2026, 8, 5, 18, 30)
+    # even a range that does not touch "now" is rejected if it starts in the current cycle
+    with pytest.raises(ValueError, match="current cycle"):
+        validate_payout_range(dt(2026, 8, 3), dt(2026, 8, 4), c, now=now)
 
 
 def test_user_test_scenario():
