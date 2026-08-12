@@ -61,6 +61,11 @@ if (errorParam === "unauthorized") {
   history.replaceState(null, "", url.href);
 }
 
+const savedTheme = localStorage.getItem("theme");
+if (savedTheme === "light" || savedTheme === "dark") {
+  document.documentElement.dataset.theme = savedTheme;
+}
+
 let currentView: View = (params.get("view") as View) ?? "rewards";
 const cycleParam = Number(params.get("cycle"));
 let selectedCycleIndex: number | null =
@@ -250,12 +255,37 @@ function capFor(raidType: string): number | null {
 
 const $app = document.getElementById("app")!;
 
+function currentTheme(): "light" | "dark" {
+  const t = document.documentElement.dataset.theme;
+  if (t === "light" || t === "dark") return t;
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function mountThemeToggle() {
+  const label = currentTheme() === "light" ? "Dark" : "Light";
+  document.querySelectorAll<HTMLButtonElement>(".theme-toggle").forEach((btn) => {
+    btn.textContent = label;
+    btn.setAttribute("aria-label", `Switch to ${label} mode`);
+    btn.addEventListener("click", () => {
+      const next = currentTheme() === "light" ? "dark" : "light";
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem("theme", next);
+      const nextLabel = next === "light" ? "Dark" : "Light";
+      document.querySelectorAll<HTMLButtonElement>(".theme-toggle").forEach((b) => {
+        b.textContent = nextLabel;
+        b.setAttribute("aria-label", `Switch to ${nextLabel} mode`);
+      });
+    });
+  });
+}
+
 function viewBtnHtml(view: View) {
   return `<button class="view-btn${currentView === view ? " active" : ""}" data-view="${escapeHtml(view)}">${VIEW_LABELS[view]}</button>`;
 }
 
-function runeTag(rune: string, color: string) {
-  return `<span class="rune-tag" style="--rune-color: ${color}">${rune}</span>`;
+function runeTag(rune: string, raidType: string) {
+  const safe = RAID_TYPES.includes(raidType) ? raidType : "wtp";
+  return `<span class="rune-tag" style="--rune-color: var(--rune-${safe})">${rune}</span>`;
 }
 
 function render() {
@@ -283,7 +313,10 @@ function render() {
     <header class="header">
       <div class="header-row">
         <h1 class="title">Guild Raid&nbsp;Tracker</h1>
-        ${userHtml}
+        <div class="header-actions">
+          <button type="button" class="theme-toggle" aria-label="Switch to light mode">Light</button>
+          ${userHtml}
+        </div>
       </div>
     </header>
 
@@ -359,6 +392,7 @@ function render() {
   }
 
   refreshCountdowns();
+  mountThemeToggle();
 }
 
 function renderLogin() {
@@ -685,7 +719,7 @@ function payoutModalHtml(): string {
             .map((r) => {
               const info = RAID_RUNES[r.raid_type]!;
               return `<div class="pay-row">
-                ${runeTag(info.rune, info.color)}
+                ${runeTag(info.rune, r.raid_type)}
                 <span class="pay-row-name">${escapeHtml(info.rune)}<span class="pay-row-sub">${escapeHtml(RAID_LABELS[r.raid_type] ?? r.raid_type)}</span></span>
                 <span class="pay-row-pending">${r.pending} pending</span>
                 <input class="settings-input pay-input" type="number" min="0" max="${r.pending}" value="${r.pending}" data-raid="${escapeHtml(r.raid_type)}" aria-label="${escapeHtml(RAID_LABELS[r.raid_type] ?? r.raid_type)} payout count">
@@ -946,7 +980,7 @@ function renderPayouts($el: HTMLElement, $status: HTMLElement) {
     html += `<tr class="${voidingPayoutId === p.id ? "voiding" : ""}">
       <td>${fmtDate(p.paid_at)}</td>
       <td class="col-member"><span class="member-name">${escapeHtml(p.member_username)}</span></td>
-      <td class="overview-cell">${runeTag(info.rune, info.color)}<span class="rune-label">${escapeHtml(p.raid_type)}</span></td>
+      <td class="overview-cell">${runeTag(info.rune, p.raid_type)}<span class="rune-label">${escapeHtml(p.raid_type)}</span></td>
       <td>${fmtDay(p.day)}</td>
       <td>${p.count_paid}</td>
       <td class="col-member">${p.paid_by_username ? escapeHtml(p.paid_by_username) : "—"}</td>
@@ -1134,7 +1168,7 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
     const info = RAID_RUNES[def.raid_type];
     const saving = savingDefId === def.id;
     html += `<tr>
-      <td class="overview-cell">${info ? runeTag(info.rune, info.color) : escapeHtml(def.raid_type)}</td>
+      <td class="overview-cell">${info ? runeTag(info.rune, def.raid_type) : escapeHtml(def.raid_type)}</td>
       <td>${escapeHtml(def.display_name)}</td>
       <td><input class="settings-input settings-cap" type="number" min="0" data-def="${def.id}" value="${def.daily_cap ?? ""}" placeholder="unlimited"></td>
       <td class="col-action">

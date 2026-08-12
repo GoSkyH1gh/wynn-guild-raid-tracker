@@ -1,30 +1,91 @@
 @import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap");
 
 :root {
-  --bg: #121a1e;
+  color-scheme: dark;
+
+  --bg: #0e1518;
   --surface: #273338;
-  --border: #2f3d3a;
+  --border: #3a4a44;
+  --hover-bg: #2b3d3a;
+  --active-bg: #142422;
   --text: #d4ddd0;
-  --text-dim: #7f9484;
-  --text-muted: #6a7f70;
-  --accent: #2B5748;
-  --accent-hover: #346a56;
-  --accent-light: #618764;
-  --accent-text: #9CB080;
+  --text-dim: #9cb1a4;
+  --text-muted: #93aa9b;
+  --accent: #25503f;
+  --accent-hover: #234e3e;
+  --accent-light: #7fa585;
+  --accent-text: #a9be94;
+  --on-accent: var(--accent-text);
 
-  --rune-notg: #5fadc0;
-  --rune-nol: #a17fc4;
-  --rune-tcc: #c0765c;
-  --rune-tna: #c09e4a;
-  --rune-wtp: #5fad70;
+  --rune-notg: #7bc3d6;
+  --rune-nol: #b298d6;
+  --rune-tcc: #d49176;
+  --rune-tna: #d5b25a;
+  --rune-wtp: #74bd85;
 
-  --ember: #e9b25c;
-  --ash: #7c9085;
+  --ember: #f0bb6c;
+  --ash: #96ac9d;
 
   --font-display: "DM Sans", sans-serif;
   --font-body: "DM Sans", sans-serif;
 
   --radius: 6px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f2f6f2;
+  --surface: #ffffff;
+  --border: #c6d1ca;
+  --hover-bg: #e8efe9;
+  --active-bg: #e7eee9;
+  --text: #18261f;
+  --text-dim: #41574c;
+  --text-muted: #5b7064;
+  --accent: #2e6b55;
+  --accent-hover: #33785f;
+  --accent-light: #417e61;
+  --accent-text: #1c5c41;
+  --on-accent: #e7f6ee;
+
+  --rune-notg: #17667f;
+  --rune-nol: #624b9f;
+  --rune-tcc: #8f3a15;
+  --rune-tna: #7a5f15;
+  --rune-wtp: #28693f;
+
+  --ember: #894f0b;
+  --ash: #556a5e;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+
+    --bg: #f2f6f2;
+    --surface: #ffffff;
+    --border: #c6d1ca;
+    --hover-bg: #e8efe9;
+    --active-bg: #e7eee9;
+    --text: #18261f;
+    --text-dim: #41574c;
+    --text-muted: #5b7064;
+    --accent: #2e6b55;
+    --accent-hover: #33785f;
+    --accent-light: #417e61;
+    --accent-text: #1c5c41;
+    --on-accent: #e7f6ee;
+
+    --rune-notg: #17667f;
+    --rune-nol: #624b9f;
+    --rune-tcc: #8f3a15;
+    --rune-tna: #7a5f15;
+    --rune-wtp: #28693f;
+
+    --ember: #894f0b;
+    --ash: #556a5e;
+  }
 }
 
 *, *::before, *::after {
@@ -44,7 +105,7 @@ html {
 body {
   font-family: var(--font-body);
   background:
-    radial-gradient(ellipse 100% 50% at 50% 0%, #2B57480a 0%, transparent 80%);
+    radial-gradient(ellipse 100% 50% at 50% 0%, color-mix(in srgb, var(--accent) 4%, transparent) 0%, transparent 80%);
   background-attachment: fixed;
   color: var(--text);
   min-height: 100vh;
@@ -116,7 +177,7 @@ body {
 
 .view-btn:hover {
   color: var(--text);
-  background: #2a3d3a;
+  background: var(--hover-bg);
 }
 
 .view-btn:focus-visible {
@@ -126,7 +187,7 @@ body {
 
 .view-btn.active {
   color: var(--accent-text);
-  background: #1e332e;
+  background: var(--active-bg);
 }
 
 /* ── Cycle picker (custom menu button) ────────── */
@@ -152,12 +213,12 @@ body {
 
 .cp-trigger:hover {
   border-color: var(--text-dim);
-  background: #2a3d3a;
+  background: var(--hover-bg);
 }
 
 .cp-trigger[aria-expanded="true"] {
   border-color: var(--accent-light);
-  background: #1e332e;
+  background: var(--active-bg);
 }
 
 .cp-trigger:focus-visible {
@@ -325,16 +386,22 @@ body {
 }
 
 .cp-item[data-highlighted="true"] {
-  background: #2a3d3a;
+  background: var(--hover-bg);
   border-color: var(--accent-light);
 }
 
-.cp-item[data-status="closed"] {
-  opacity: 0.55;
+.cp-item[data-status="closed"] .cp-item-title {
+  color: var(--text-dim);
 }
 
-.cp-item[data-status="closed"][data-highlighted="true"] {
-  opacity: 0.85;
+.cp-item[data-status="closed"] .cp-item-dates,
+.cp-item[data-status="closed"] .cp-item-ends-in {
+  color: var(--text-muted);
+}
+
+.cp-item[data-status="closed"] .cp-item-badge {
+  background: color-mix(in srgb, var(--text-dim) 10%, transparent);
+  color: var(--text-dim);
 }
 
 .cp-item-badge {
@@ -471,7 +538,7 @@ body {
 
 .btn-fetch:hover:not(:disabled) {
   background: var(--accent);
-  color: var(--accent-text);
+  color: var(--on-accent);
 }
 
 .btn-fetch:focus-visible {
@@ -578,7 +645,7 @@ body {
   letter-spacing: 0;
   text-transform: none;
   margin-top: 0.1rem;
-  opacity: 0.5;
+  color: var(--text-dim);
 }
 
 .raid-table td {
@@ -673,7 +740,7 @@ body {
 }
 
 .member-row:hover {
-  background: #2a3d3a;
+  background: var(--hover-bg);
 }
 
 .member-row.selected {
@@ -826,12 +893,8 @@ body {
   color: var(--rune-tcc);
 }
 
-.member-row.ineligible {
-  opacity: 0.55;
-}
-
-.member-row.ineligible:hover {
-  opacity: 0.85;
+.member-row.ineligible td {
+  color: var(--text-dim);
 }
 
 .section-row td {
@@ -865,7 +928,7 @@ body {
 
 .btn-pay:hover:not(:disabled) {
   background: var(--accent);
-  color: var(--accent-text);
+  color: var(--on-accent);
 }
 
 .btn-pay:disabled {
@@ -965,8 +1028,8 @@ tr.voiding td {
 
 @keyframes row-fade {
   0% { opacity: 1; }
-  70% { opacity: 0.35; }
-  100% { opacity: 0.35; }
+  70% { opacity: 0.5; }
+  100% { opacity: 0.5; }
 }
 
 .loading-state {
@@ -1027,7 +1090,7 @@ tr.voiding td {
 
 .btn-retry:hover {
   background: var(--accent);
-  color: var(--accent-text);
+  color: var(--on-accent);
 }
 
 /* ── Login screen ─────────────────────────────── */
@@ -1127,7 +1190,7 @@ tr.voiding td {
   height: 24px;
   border-radius: 50%;
   background: var(--accent);
-  color: var(--accent-text);
+  color: var(--on-accent);
   font-weight: 700;
   font-size: 0.7rem;
 }
@@ -1155,6 +1218,35 @@ tr.voiding td {
 }
 
 .btn-logout:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.theme-toggle {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.theme-toggle:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.theme-toggle:focus-visible {
   outline: 2px solid var(--accent-text);
   outline-offset: 2px;
 }
@@ -1353,7 +1445,6 @@ tr.voiding td {
 
 .settings-date {
   width: 9rem;
-  color-scheme: dark;
 }
 
 .settings-schedule {
