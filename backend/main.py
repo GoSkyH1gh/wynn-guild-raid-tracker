@@ -25,7 +25,7 @@ from .auth import (
     delete_jwt_cookie,
     revoke_user_token,
 )
-from .database import AsyncSessionLocal, engine, verify_database_connection, keep_database_warm
+from .database import AsyncSessionLocal, engine, verify_database_connection
 from .models import Base, DiscordUser, FetchLog, GuildMember, RaidSnapshot, RewardDefinition, PayoutRecord, CycleConfig, DetectedCompletion
 from .schemas import (
     CurrentUserOut,
@@ -175,15 +175,8 @@ async def lifespan(app: FastAPI):
 
     global _background_task
     _background_task = asyncio.create_task(_periodic_fetch())
-    _keepalive_task = asyncio.create_task(keep_database_warm())
 
     yield
-
-    _keepalive_task.cancel()
-    try:
-        await _keepalive_task
-    except asyncio.CancelledError:
-        pass
 
     if _background_task:
         _background_task.cancel()
