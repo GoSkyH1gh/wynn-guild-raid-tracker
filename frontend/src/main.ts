@@ -37,7 +37,7 @@ import { mountCyclePicker, type CyclePickerOption } from "./cycle-picker.js";
 import type { AnalyticsProps } from "./charts/analytics.js";
 import { preloadApex } from "./charts/loader.js";
 
-type View = "rewards" | "analytics" | "payouts" | "status" | "settings";
+type View = "rewards" | "payouts" | "analytics" | "status" | "settings";
 
 const RAID_TYPES = ["notg", "nol", "tcc", "tna", "wtp"];
 const VIEW_LABELS: Record<View, string> = {
@@ -350,7 +350,7 @@ function render() {
 
     <main class="main">
       <div class="controls">
-        <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("analytics")}${viewBtnHtml("payouts")}${viewBtnHtml("status")}${currentUser?.is_admin ? viewBtnHtml("settings") : ""}</div>
+        <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("payouts")}${viewBtnHtml("analytics")}${viewBtnHtml("status")}${currentUser?.is_admin ? viewBtnHtml("settings") : ""}</div>
         ${showCyclePicker
           ? `<div class="cycle-picker-root" id="cycle-picker-root"></div>`
           : ""}
