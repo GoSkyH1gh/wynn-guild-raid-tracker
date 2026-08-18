@@ -115,6 +115,17 @@ document.dispatchEvent(new CustomEvent("themechange"));
 await sleep(300);
 assert(app.querySelector("#chart-totals svg") !== null, "charts rebuilt after themechange");
 
+// trend chart fetch fails in this test (no backend) → error + retry flow
+const trendHost = app.querySelector("#chart-trend")!;
+const trendErrorShown = () => trendHost.querySelector(".error-detail") !== null;
+assert(trendErrorShown(), "trend fetch failure surfaces inline error");
+const trendRetry = trendHost.querySelector<HTMLButtonElement>("#trend-retry");
+assert(trendRetry !== null, "trend error state offers a retry button");
+trendRetry!.click();
+assert(trendHost.querySelector(".chart-loading") !== null, "retry puts the trend host back to loading");
+await sleep(1200);
+assert(trendErrorShown(), "failed retry surfaces the error again");
+
 teardownAnalytics();
 assert(app.querySelector("#chart-totals svg") === null, "teardown removes charts");
 

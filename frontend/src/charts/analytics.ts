@@ -298,7 +298,18 @@ async function ensureTrendData(gen: number): Promise<void> {
     if (gen === generation && active) {
       const host = document.getElementById("chart-trend");
       if (host) {
-        host.innerHTML = `<p class="error-detail">Failed to load per-day data: ${escapeHtml(err instanceof Error ? err.message : String(err))}</p>`;
+        host.innerHTML = `<p class="error-detail">Failed to load per-day data: ${escapeHtml(err instanceof Error ? err.message : String(err))}</p>
+          <button type="button" class="btn-retry" id="trend-retry">Retry</button>`;
+        host.querySelector("#trend-retry")?.addEventListener(
+          "click",
+          () => {
+            trendCache.delete(key);
+            trendData = null;
+            host.innerHTML = `<div class="chart-loading"><span class="spinner"></span><p>Loading…</p></div>`;
+            void ensureTrendData(generation);
+          },
+          { once: true },
+        );
       }
     }
   }
@@ -487,8 +498,11 @@ function topOptions(
   mode: ChartMode,
 ): ApexCharts.ApexOptions {
   const label = METRIC_LABEL[metric];
+  // 24px per bar, capped so the fixed Top 20 doesn't push the totals and
+  // trend charts below the fold.
+  const height = Math.min(520, Math.max(160, bars.length * 24 + 100));
   return {
-    ...chartScaffold(mode, colors, "bar", Math.max(160, bars.length * 34 + 100), true),
+    ...chartScaffold(mode, colors, "bar", height, true),
     series: RUNE_TYPES.map((rt) => ({
       name: RUNE_META[rt].short,
       data: bars.map((b) => b.segments.find((s) => s.raidType === rt)?.value ?? 0),

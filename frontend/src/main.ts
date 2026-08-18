@@ -34,7 +34,7 @@ import {
   RAID_LABELS,
 } from "./api.js";
 import { mountCyclePicker, type CyclePickerOption } from "./cycle-picker.js";
-import { renderAnalytics, teardownAnalytics } from "./charts/analytics.js";
+import type { AnalyticsProps } from "./charts/analytics.js";
 import { preloadApex } from "./charts/loader.js";
 
 type View = "rewards" | "analytics" | "payouts" | "status" | "settings";
@@ -292,6 +292,22 @@ function runeTag(rune: string, raidType: string) {
   return `<span class="rune-tag" style="--rune-color: var(--rune-${safe})">${rune}</span>`;
 }
 
+// ── lazy analytics view module ─────────────────────────────────
+// The view + chart code is a separate chunk loaded on first visit to the
+// Analytics tab, so users who never open it don't download it.
+
+type AnalyticsModule = {
+  renderAnalytics: ($el: HTMLElement, $status: HTMLElement, props: AnalyticsProps) => void;
+  teardownAnalytics: () => void;
+};
+
+let analyticsLoaded: Promise<AnalyticsModule> | null = null;
+
+function loadAnalytics(): Promise<AnalyticsModule> {
+  analyticsLoaded ??= import("./charts/analytics.js");
+  return analyticsLoaded;
+}
+
 function render() {
   if (!isAuthenticated() && !currentUser) {
     renderLogin();
@@ -300,7 +316,11 @@ function render() {
 
   destroyPicker?.();
   destroyPicker = null;
-  teardownAnalytics();
+  // Only tear down charts when the analytics module was ever loaded; the
+  // view code lives in its own lazy chunk (see loadAnalytics below).
+  if (analyticsLoaded) {
+    void analyticsLoaded.then((mod) => mod.teardownAnalytics());
+  }
 
   const showCyclePicker =
     (currentView === "rewards" || currentView === "analytics") &&
@@ -393,11 +413,21 @@ function render() {
     renderRewards($contentEl, $statusBarEl);
   } else if (currentView === "analytics") {
     const cycle = selectedCycle();
-    renderAnalytics($contentEl, $statusBarEl, {
+    const analyticsProps: AnalyticsProps = {
       cycle,
       statusHtml: cycle ? cycleStatusHtml(cycle) : "",
       summary: summaryCycleIndex === selectedCycleIndex ? summaryData : null,
       summaryError: fetchError,
+    };
+    if (!analyticsLoaded) {
+      $contentEl.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading analytics…</p></div>`;
+    }
+    const pendingView = currentView;
+    void loadAnalytics().then((mod) => {
+      // The module may resolve after the user switched views (or rendered
+      // again), in which case $contentEl is detached — skip the mount.
+      if (currentView !== pendingView || !document.body.contains($contentEl)) return;
+      mod.renderAnalytics($contentEl, $statusBarEl, analyticsProps);
     });
   } else if (currentView === "payouts") {
     renderPayouts($contentEl, $statusBarEl);
