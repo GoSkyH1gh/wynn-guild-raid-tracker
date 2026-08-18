@@ -34,12 +34,15 @@ import {
   RAID_LABELS,
 } from "./api.js";
 import { mountCyclePicker, type CyclePickerOption } from "./cycle-picker.js";
+import { renderAnalytics, teardownAnalytics } from "./charts/analytics.js";
+import { preloadApex } from "./charts/loader.js";
 
-type View = "rewards" | "payouts" | "status" | "settings";
+type View = "rewards" | "analytics" | "payouts" | "status" | "settings";
 
 const RAID_TYPES = ["notg", "nol", "tcc", "tna", "wtp"];
 const VIEW_LABELS: Record<View, string> = {
   rewards: "Rewards",
+  analytics: "Analytics",
   payouts: "Payouts",
   status: "Status",
   settings: "Settings",
@@ -275,6 +278,7 @@ function mountThemeToggle() {
         b.textContent = nextLabel;
         b.setAttribute("aria-label", `Switch to ${nextLabel} mode`);
       });
+      document.dispatchEvent(new CustomEvent("themechange"));
     });
   });
 }
@@ -296,8 +300,12 @@ function render() {
 
   destroyPicker?.();
   destroyPicker = null;
+  teardownAnalytics();
 
-  const showCyclePicker = currentView === "rewards" && !!cycles && cycles.length > 0;
+  const showCyclePicker =
+    (currentView === "rewards" || currentView === "analytics") &&
+    !!cycles &&
+    cycles.length > 0;
 
   const userHtml = currentUser
     ? `<div class="user-info">
@@ -322,7 +330,7 @@ function render() {
 
     <main class="main">
       <div class="controls">
-        <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("payouts")}${viewBtnHtml("status")}${currentUser?.is_admin ? viewBtnHtml("settings") : ""}</div>
+        <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("analytics")}${viewBtnHtml("payouts")}${viewBtnHtml("status")}${currentUser?.is_admin ? viewBtnHtml("settings") : ""}</div>
         ${showCyclePicker
           ? `<div class="cycle-picker-root" id="cycle-picker-root"></div>`
           : ""}
@@ -383,6 +391,14 @@ function render() {
 
   if (currentView === "rewards") {
     renderRewards($contentEl, $statusBarEl);
+  } else if (currentView === "analytics") {
+    const cycle = selectedCycle();
+    renderAnalytics($contentEl, $statusBarEl, {
+      cycle,
+      statusHtml: cycle ? cycleStatusHtml(cycle) : "",
+      summary: summaryCycleIndex === selectedCycleIndex ? summaryData : null,
+      summaryError: fetchError,
+    });
   } else if (currentView === "payouts") {
     renderPayouts($contentEl, $statusBarEl);
   } else if (currentView === "settings") {
@@ -1144,7 +1160,7 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
     return;
   }
 
-  if (rewardDefs === null || cycleConfig === null) {
+  if (rewardDefs === null || cycleConfig === null || usersData === null) {
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading settings…</p></div>`;
     return;
   }
@@ -1462,6 +1478,25 @@ function showToast(msg: string) {
 
 // ── Data fetching ──────────────────────────────────────────────
 
+// Signature of everything that affects the rendered UI. fetchData()
+// compares it before each render so that background polls which found
+// no changes don't wipe the DOM (focus, scroll, in-progress input).
+let lastRenderSignature: string | null = null;
+
+function dataSignature(): string {
+  return JSON.stringify([
+    rewardDefs,
+    cycleConfig,
+    usersData,
+    cycles,
+    summaryCycleIndex,
+    summaryData,
+    payoutsData,
+    statusData,
+    fetchError,
+  ]);
+}
+
 async function fetchData() {
   if (!isAuthenticated() && !currentUser) {
     render();
@@ -1488,7 +1523,7 @@ async function fetchData() {
       cycles = await fetchCycles();
       selectedCycle();
     }
-    if (currentView === "rewards") {
+    if (currentView === "rewards" || currentView === "analytics") {
       await loadSummary();
     }
     payoutsData = await fetchPayoutRecords();
@@ -1507,8 +1542,12 @@ async function fetchData() {
   }
 
   isFetching = false;
-  if (payModalMember === null) {
-    render();
+  const signature = dataSignature();
+  if (signature !== lastRenderSignature) {
+    lastRenderSignature = signature;
+    if (payModalMember === null) {
+      render();
+    }
   }
 }
 
@@ -1534,6 +1573,7 @@ async function init() {
   if (currentUser || isAuthenticated()) {
     render();
     fetchData();
+    preloadApex();
     setInterval(fetchData, 60000);
     setInterval(refreshCountdowns, 30000);
     document.addEventListener("visibilitychange", () => {

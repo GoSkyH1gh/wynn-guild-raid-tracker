@@ -1,0 +1,94 @@
+import {
+  cycleTotals,
+  memberLeaderboard,
+  perDayTotals,
+  RUNE_TYPES,
+  type Metric,
+} from "./src/charts/series.js";
+import type { RewardSummary, RewardDay } from "./src/api.js";
+
+const results: string[] = [];
+function assert(cond: boolean, msg: string): void {
+  if (!cond) throw new Error(`FAIL: ${msg}`);
+  results.push(`ok: ${msg}`);
+}
+const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+
+// ── fixtures ─────────────────────────────────────────────────────
+
+const summary: RewardSummary[] = [
+  { member_uuid: "m1", username: "Alice", rank: "Recruit", is_eligible: true, raid_type: "notg", days: 3, detected: 5, payable: 4, paid: 1, pending: 3, daily_cap: 2 },
+  { member_uuid: "m1", username: "Alice", rank: "Recruit", is_eligible: true, raid_type: "nol", days: 2, detected: 2, payable: 2, paid: 2, pending: 0, daily_cap: null },
+  { member_uuid: "m2", username: "Bob", rank: "Member", is_eligible: false, raid_type: "notg", days: 1, detected: 1, payable: 0, paid: 0, pending: 0, daily_cap: null },
+  { member_uuid: "m3", username: "Carol", rank: "Officer", is_eligible: true, raid_type: "notg", days: 4, detected: 7, payable: 6, paid: 6, pending: 0, daily_cap: 2 },
+  { member_uuid: "m3", username: "Carol", rank: "Officer", is_eligible: true, raid_type: "bogus", days: 1, detected: 9, payable: 0, paid: 0, pending: 0, daily_cap: null },
+];
+
+const days: RewardDay[] = [
+  {
+    day: "2026-08-01",
+    entries: [
+      { member_uuid: "m1", username: "Alice", rank: "Recruit", is_eligible: true, raid_type: "notg", daily_cap: 2, detected: 2, payable: 2, paid: 0, pending: 2, over_cap: 0 },
+      { member_uuid: "m2", username: "Bob", rank: "Member", is_eligible: false, raid_type: "notg", daily_cap: null, detected: 1, payable: 0, paid: 0, pending: 0, over_cap: 0 },
+      { member_uuid: "m1", username: "Alice", rank: "Recruit", is_eligible: true, raid_type: "nol", daily_cap: null, detected: 1, payable: 1, paid: 1, pending: 0, over_cap: 0 },
+    ],
+  },
+  {
+    day: "2026-08-02",
+    entries: [
+      { member_uuid: "m1", username: "Alice", rank: "Recruit", is_eligible: true, raid_type: "notg", daily_cap: 2, detected: 1, payable: 1, paid: 0, pending: 1, over_cap: 0 },
+    ],
+  },
+];
+
+// ── cycleTotals ──────────────────────────────────────────────────
+
+const totals = cycleTotals(summary, "pending");
+const notg = totals.find((t) => t.raidType === "notg");
+assert(eq(totals.length, 5), "cycleTotals: one entry per raid type");
+assert(eq(notg?.detected, 13), "cycleTotals: detected sums all members (5+1+7)");
+assert(eq(notg?.payable, 10), "cycleTotals: payable sums all members (4+0+6)");
+assert(eq(notg?.paid, 7), "cycleTotals: paid sums all members (1+0+6)");
+assert(eq(notg?.pending, 3), "cycleTotals: pending sums all members (3+0+0)");
+assert(eq(notg?.overCap, 2), "cycleTotals: overCap = detected-payable per capped member (1+1)");
+assert(eq(notg?.value, 3), "cycleTotals: value follows the selected metric (pending)");
+const nol = totals.find((t) => t.raidType === "nol");
+assert(eq(nol?.overCap, 0), "cycleTotals: uncapped raids always have overCap 0");
+assert(eq(cycleTotals(summary, "detected")[0]?.value, 13), "cycleTotals: detected metric value");
+assert(eq(cycleTotals(summary, "paid")[0]?.value, 7), "cycleTotals: paid metric value");
+assert(eq(cycleTotals([], "pending")[0]?.value, 0), "cycleTotals: empty summary → zeros");
+
+// ── perDayTotals ─────────────────────────────────────────────────
+
+const trend = perDayTotals(days, "detected", [...RUNE_TYPES]);
+assert(eq(trend.categories, ["2026-08-01", "2026-08-02"]), "perDayTotals: categories are ISO days in order");
+const notgSeries = trend.series.find((s) => s.raidType === "notg");
+assert(eq(notgSeries?.data, [3, 1]), "perDayTotals: aggregates entries per day per raid (2+1, 1)");
+const nolSeries = trend.series.find((s) => s.raidType === "nol");
+assert(eq(nolSeries?.data, [1, 0]), "perDayTotals: raid with no entry on a day → 0");
+const pendingTrend = perDayTotals(days, "pending", [...RUNE_TYPES]);
+const notgPending = pendingTrend.series.find((s) => s.raidType === "notg");
+assert(eq(notgPending?.data, [2, 1]), "perDayTotals: pending metric respects eligibility zeros");
+const filtered = perDayTotals(days, "detected", ["notg"]);
+assert(eq(filtered.series.length, 1) && eq(filtered.series[0]?.raidType, "notg"), "perDayTotals: enabled filter");
+assert(eq(perDayTotals([], "detected", [...RUNE_TYPES]).categories.length, 0), "perDayTotals: empty days");
+
+// ── memberLeaderboard ────────────────────────────────────────────
+
+const board = memberLeaderboard(summary, "pending", 10, [...RUNE_TYPES]);
+assert(eq(board.length, 3), "leaderboard: one bar per member with rows");
+assert(eq(board[0]?.username, "Alice"), "leaderboard: sorted by total desc (Alice 3 pending)");
+assert(eq(board[0]?.total, 3), "leaderboard: total sums the metric over enabled raids");
+assert(eq(board[0]?.segments.map((s) => s.raidType), ["notg", "nol"]), "leaderboard: segments in RUNE_TYPES order");
+assert(eq(board[0]?.eligible, true), "leaderboard: eligibility flag");
+assert(eq(board.find((b) => b.username === "Bob")?.eligible, false), "leaderboard: ineligible flag (Bob)");
+const top2 = memberLeaderboard(summary, "pending", 2, [...RUNE_TYPES]);
+assert(eq(top2.length, 2), "leaderboard: topN slicing");
+const detectedBoard = memberLeaderboard(summary, "detected", 10, [...RUNE_TYPES]);
+assert(eq(detectedBoard[0]?.username, "Alice") && eq(detectedBoard[0]?.total, 7), "leaderboard: detected metric ignores bogus raid");
+const raidsOnly = memberLeaderboard(summary, "pending", 10, ["nol"]);
+assert(eq(raidsOnly[0]?.total, 0), "leaderboard: raid filter restricts segments");
+assert(eq(memberLeaderboard([], "pending", 5, [...RUNE_TYPES]).length, 0), "leaderboard: empty summary");
+
+console.log(results.join("\n"));
+console.log(`\n${results.length} assertions passed`);

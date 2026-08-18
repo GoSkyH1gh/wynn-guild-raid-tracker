@@ -105,7 +105,11 @@ export const RAID_LABELS: Record<string, string> = {
   wtp: "The Wartorn Palace",
 };
 
-const BASE = import.meta.env.VITE_API_BASE ?? "";
+// Vite injects import.meta.env; in Node test bundles import.meta is absent.
+const BASE: string =
+  typeof import.meta !== "undefined" && import.meta.env
+    ? import.meta.env.VITE_API_BASE ?? ""
+    : "";
 
 let _token: string | null = null;
 
