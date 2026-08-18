@@ -1649,6 +1649,12 @@ tr.voiding td {
   grid-column: 1 / -1;
 }
 
+/* ApexCharts ships no spacing between the legend marker and its label
+   (.apexcharts-legend-text's padding/margin cancel out), so add it here. */
+.chart-card .apexcharts-legend-marker {
+  margin-right: 8px;
+}
+
 .chart-host {
   min-height: 300px;
 }

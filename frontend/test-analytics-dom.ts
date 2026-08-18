@@ -79,6 +79,13 @@ assert(metricBtn?.getAttribute("aria-pressed") === "true", "metric toggle update
 await sleep(300);
 assert(app.querySelector("#chart-totals svg") !== null, "totals chart survives metric toggle (no remount)");
 
+// all legends share the same circle marker style (trend chart isn't mounted
+// in this test because its per-day fetch has no backend → 2 charts × 5 raids)
+const circleMarkers = app.querySelectorAll(".apexcharts-legend-marker.apexcharts-marker-circle");
+const squareMarkers = app.querySelectorAll(".apexcharts-legend-marker.apexcharts-marker-square");
+assert(circleMarkers.length === 10, "mounted legends use circle markers (10 total)");
+assert(squareMarkers.length === 0, "no square legend markers remain");
+
 // each chart's legend toggles raids (the totals legend is the new one)
 const totalsHost = app.querySelector("#chart-totals")!;
 const totalsLegend = totalsHost.querySelectorAll(".apexcharts-legend-series");

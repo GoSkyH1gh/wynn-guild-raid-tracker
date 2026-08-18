@@ -400,6 +400,17 @@ function bindThemeListener(): void {
 
 // ── options builders ──
 
+/** Shared legend style: bottom position, circle markers, muted text. */
+function bottomLegend(
+  colors: ChartColors,
+): NonNullable<ApexCharts.ApexOptions["legend"]> {
+  return {
+    position: "bottom",
+    labels: { colors: colors.muted },
+    markers: { shape: "circle" },
+  };
+}
+
 function chartScaffold(
   mode: ChartMode,
   colors: ChartColors,
@@ -488,11 +499,7 @@ function totalsOptions(
       labels: { style: { colors: colors.text } },
       title: { text: label, style: { color: colors.muted } },
     },
-    legend: {
-      position: "bottom",
-      labels: { colors: colors.muted },
-      onItemClick: { toggleDataSeries: true },
-    },
+    legend: bottomLegend(colors),
     tooltip: {
       theme: mode,
       y: {
@@ -523,7 +530,7 @@ function trendOptions(
       labels: { style: { colors: colors.text } },
       title: { text: label, style: { color: colors.muted } },
     },
-    legend: { position: "bottom", labels: { colors: colors.muted } },
+    legend: bottomLegend(colors),
     tooltip: {
       theme: mode,
       y: { formatter: (val: number) => `${val} ${label.toLowerCase()}` },
@@ -553,7 +560,7 @@ function topOptions(
       labels: { style: { colors: colors.text } },
       title: { text: label, style: { color: colors.muted } },
     },
-    legend: { position: "bottom", labels: { colors: colors.muted } },
+    legend: bottomLegend(colors),
     tooltip: {
       theme: mode,
       y: { formatter: (val: number) => `${val} ${label.toLowerCase()}` },
