@@ -56,6 +56,7 @@ const nol = totals.find((t) => t.raidType === "nol");
 assert(eq(nol?.overCap, 0), "cycleTotals: uncapped raids always have overCap 0");
 assert(eq(cycleTotals(summary, "detected")[0]?.value, 13), "cycleTotals: detected metric value");
 assert(eq(cycleTotals(summary, "paid")[0]?.value, 7), "cycleTotals: paid metric value");
+assert(eq(cycleTotals(summary, "eligible")[0]?.value, 10), "cycleTotals: eligible metric = paid + pending (7+3)");
 assert(eq(cycleTotals([], "pending")[0]?.value, 0), "cycleTotals: empty summary → zeros");
 
 // ── perDayTotals ─────────────────────────────────────────────────
@@ -71,6 +72,11 @@ const notgPending = pendingTrend.series.find((s) => s.raidType === "notg");
 assert(eq(notgPending?.data, [2, 1]), "perDayTotals: pending metric respects eligibility zeros");
 const filtered = perDayTotals(days, "detected", ["notg"]);
 assert(eq(filtered.series.length, 1) && eq(filtered.series[0]?.raidType, "notg"), "perDayTotals: enabled filter");
+const eligibleTrend = perDayTotals(days, "eligible", [...RUNE_TYPES]);
+const notgEligible = eligibleTrend.series.find((s) => s.raidType === "notg");
+assert(eq(notgEligible?.data, [2, 1]), "perDayTotals: eligible metric = paid + pending per day");
+const nolEligible = eligibleTrend.series.find((s) => s.raidType === "nol");
+assert(eq(nolEligible?.data, [1, 0]), "perDayTotals: eligible includes paid for uncapped nol");
 assert(eq(perDayTotals([], "detected", [...RUNE_TYPES]).categories.length, 0), "perDayTotals: empty days");
 
 // ── memberLeaderboard ────────────────────────────────────────────
@@ -86,6 +92,8 @@ const top2 = memberLeaderboard(summary, "pending", 2, [...RUNE_TYPES]);
 assert(eq(top2.length, 2), "leaderboard: topN slicing");
 const detectedBoard = memberLeaderboard(summary, "detected", 10, [...RUNE_TYPES]);
 assert(eq(detectedBoard[0]?.username, "Alice") && eq(detectedBoard[0]?.total, 7), "leaderboard: detected metric ignores bogus raid");
+const eligibleBoard = memberLeaderboard(summary, "eligible", 10, [...RUNE_TYPES]);
+assert(eq(eligibleBoard[0]?.username, "Alice") && eq(eligibleBoard[0]?.total, 6), "leaderboard: eligible metric = paid + pending (Alice 4+2)");
 const raidsOnly = memberLeaderboard(summary, "pending", 10, ["nol"]);
 assert(eq(raidsOnly[0]?.total, 0), "leaderboard: raid filter restricts segments");
 assert(eq(memberLeaderboard([], "pending", 5, [...RUNE_TYPES]).length, 0), "leaderboard: empty summary");

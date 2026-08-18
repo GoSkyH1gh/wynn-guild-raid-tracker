@@ -56,7 +56,11 @@ assert(app.querySelector(".error-state") !== null, "summary error → error stat
 
 renderAnalytics(app, statusBar, { cycle, statusHtml: "Cycle 1", summary, summaryError: null });
 assert(app.querySelector(".analytics-controls") !== null, "controls rendered");
-assert(app.querySelectorAll("[data-metric]").length === 3, "metric toggle has 3 options");
+assert(app.querySelectorAll("[data-metric]").length === 4, "metric toggle has 4 options");
+assert(
+  app.querySelector<HTMLButtonElement>('[data-metric="detected"]')?.getAttribute("aria-pressed") === "true",
+  "detected is the default metric",
+);
 assert(app.querySelectorAll("[data-raid]").length === 5, "raid chips rendered for 5 raids");
 assert(app.querySelectorAll("#ctl-member option").length === 4, "member select: all + 3 members");
 assert(app.querySelectorAll("#ctl-top option").length === 3, "top N select has 3 options");
@@ -70,9 +74,9 @@ assert(svgs.length >= 2, `charts mounted (svg found in ${svgs.length} of 3 hosts
 // ── controls update charts in place without re-rendering HTML ──
 
 const controls = app.querySelector(".analytics-controls");
-const metricBtn = app.querySelector<HTMLButtonElement>('[data-metric="detected"]');
+const metricBtn = app.querySelector<HTMLButtonElement>('[data-metric="eligible"]');
 metricBtn?.click();
-assert(metricBtn?.getAttribute("aria-pressed") === "true", "metric toggle updates aria-pressed");
+assert(metricBtn?.getAttribute("aria-pressed") === "true", "metric toggle updates aria-pressed on eligible");
 await sleep(300);
 assert(app.querySelector("#chart-totals svg") !== null, "totals chart survives metric toggle (no remount)");
 

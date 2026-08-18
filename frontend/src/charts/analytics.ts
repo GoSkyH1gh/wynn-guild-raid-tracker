@@ -7,7 +7,9 @@ import {
   cycleTotals,
   memberLeaderboard,
   perDayTotals,
+  METRIC_HINT,
   METRIC_LABEL,
+  METRIC_ORDER,
   RUNE_META,
   RUNE_TYPES,
   type MemberBar,
@@ -34,7 +36,7 @@ export interface AnalyticsProps {
 
 // ── view state (module-level, mirrors main.ts style; survives re-renders) ──
 
-let metric: Metric = "pending";
+let metric: Metric = "detected";
 let memberUuid: string | null = null; // null = all members
 let enabledRaids: Set<Rune> = new Set(RUNE_TYPES);
 let topN = 10;
@@ -146,12 +148,10 @@ function controlsHtml(summary: RewardSummary[]): string {
     )
     .join("");
 
-  const metricButtons = (["pending", "paid", "detected"] as Metric[])
-    .map(
-      (m) =>
-        `<button type="button" class="view-btn${metric === m ? " active" : ""}" data-metric="${m}" aria-pressed="${metric === m}">${METRIC_LABEL[m]}</button>`,
-    )
-    .join("");
+  const metricButtons = METRIC_ORDER.map(
+    (m) =>
+      `<button type="button" class="view-btn${metric === m ? " active" : ""}" data-metric="${m}" aria-pressed="${metric === m}" title="${escapeHtml(METRIC_HINT[m])}">${METRIC_LABEL[m]}</button>`,
+  ).join("");
 
   const raidChips = RUNE_TYPES.map((rt) => {
     const on = enabledRaids.has(rt);

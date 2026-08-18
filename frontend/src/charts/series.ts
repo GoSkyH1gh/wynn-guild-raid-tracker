@@ -15,13 +15,33 @@ export const RUNE_META: Record<Rune, { short: string; name: string }> = {
 
 // ── Metric ──
 
-export type Metric = "pending" | "paid" | "detected";
+export type Metric = "detected" | "eligible" | "paid" | "pending";
 
 export const METRIC_LABEL: Record<Metric, string> = {
-  pending: "Pending",
-  paid: "Paid",
   detected: "Detected",
+  eligible: "Eligible",
+  paid: "Paid",
+  pending: "Pending",
 };
+
+/** Button order in the metric toggle (most inclusive first). */
+export const METRIC_ORDER: Metric[] = ["detected", "eligible", "paid", "pending"];
+
+/** Hint shown on the metric buttons. */
+export const METRIC_HINT: Record<Metric, string> = {
+  detected: "Completions detected in the raid log",
+  eligible: "Paid + Pending (counts toward payout)",
+  paid: "Completions already paid out",
+  pending: "Eligible and owed, but not paid yet",
+};
+
+/** Value of a row for the selected metric. "eligible" is paid + pending. */
+function metricValue(
+  r: Pick<RewardSummary, "detected" | "paid" | "pending">,
+  metric: Metric,
+): number {
+  return metric === "eligible" ? r.paid + r.pending : r[metric];
+}
 
 function isRune(rt: string): rt is Rune {
   return (RUNE_TYPES as string[]).includes(rt);
@@ -62,7 +82,7 @@ export function cycleTotals(summary: RewardSummary[], metric: Metric): RaidTotal
     }
   }
   for (const t of totals.values()) {
-    t.value = t[metric];
+    t.value = metricValue(t, metric);
   }
   return RUNE_TYPES.map((rt) => totals.get(rt)!);
 }
@@ -92,7 +112,7 @@ export function perDayTotals(
     for (const e of day.entries) {
       const i = idxByRaid.get(e.raid_type as Rune);
       if (i === undefined) continue; // unknown raid types are ignored
-      series[i]!.data[di]! += e[metric];
+      series[i]!.data[di]! += metricValue(e, metric);
     }
   });
   return { categories: days.map((d) => d.day), series };
@@ -133,7 +153,7 @@ export function memberLeaderboard(
       };
       byMember.set(r.member_uuid, m);
     }
-    m.segments.push({ raidType: r.raid_type, value: r[metric] });
+    m.segments.push({ raidType: r.raid_type, value: metricValue(r, metric) });
   }
   for (const m of byMember.values()) {
     m.segments.sort(
