@@ -8,4 +8,12 @@ export default defineConfig({
       "/health": "http://localhost:8000",
     },
   },
+  optimizeDeps: {
+    include: [
+      "apexcharts/line",
+      "apexcharts/bar",
+      "apexcharts/features/legend",
+      "apexcharts/features/toolbar",
+    ],
+  },
 });

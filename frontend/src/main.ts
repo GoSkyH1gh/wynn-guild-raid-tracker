@@ -34,12 +34,15 @@ import {
   RAID_LABELS,
 } from "./api.js";
 import { mountCyclePicker, type CyclePickerOption } from "./cycle-picker.js";
+import type { AnalyticsProps } from "./charts/analytics.js";
+import { preloadApex } from "./charts/loader.js";
 
-type View = "rewards" | "payouts" | "status" | "settings";
+type View = "rewards" | "payouts" | "analytics" | "status" | "settings";
 
 const RAID_TYPES = ["notg", "nol", "tcc", "tna", "wtp"];
 const VIEW_LABELS: Record<View, string> = {
   rewards: "Rewards",
+  analytics: "Analytics",
   payouts: "Payouts",
   status: "Status",
   settings: "Settings",
@@ -275,6 +278,7 @@ function mountThemeToggle() {
         b.textContent = nextLabel;
         b.setAttribute("aria-label", `Switch to ${nextLabel} mode`);
       });
+      document.dispatchEvent(new CustomEvent("themechange"));
     });
   });
 }
@@ -288,6 +292,22 @@ function runeTag(rune: string, raidType: string) {
   return `<span class="rune-tag" style="--rune-color: var(--rune-${safe})">${rune}</span>`;
 }
 
+// ── lazy analytics view module ─────────────────────────────────
+// The view + chart code is a separate chunk loaded on first visit to the
+// Analytics tab, so users who never open it don't download it.
+
+type AnalyticsModule = {
+  renderAnalytics: ($el: HTMLElement, $status: HTMLElement, props: AnalyticsProps) => void;
+  teardownAnalytics: () => void;
+};
+
+let analyticsLoaded: Promise<AnalyticsModule> | null = null;
+
+function loadAnalytics(): Promise<AnalyticsModule> {
+  analyticsLoaded ??= import("./charts/analytics.js");
+  return analyticsLoaded;
+}
+
 function render() {
   if (!isAuthenticated() && !currentUser) {
     renderLogin();
@@ -296,8 +316,16 @@ function render() {
 
   destroyPicker?.();
   destroyPicker = null;
+  // Only tear down charts when the analytics module was ever loaded; the
+  // view code lives in its own lazy chunk (see loadAnalytics below).
+  if (analyticsLoaded) {
+    void analyticsLoaded.then((mod) => mod.teardownAnalytics());
+  }
 
-  const showCyclePicker = currentView === "rewards" && !!cycles && cycles.length > 0;
+  const showCyclePicker =
+    (currentView === "rewards" || currentView === "analytics") &&
+    !!cycles &&
+    cycles.length > 0;
 
   const userHtml = currentUser
     ? `<div class="user-info">
@@ -322,7 +350,7 @@ function render() {
 
     <main class="main">
       <div class="controls">
-        <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("payouts")}${viewBtnHtml("status")}${currentUser?.is_admin ? viewBtnHtml("settings") : ""}</div>
+        <div class="view-toggle">${viewBtnHtml("rewards")}${viewBtnHtml("payouts")}${viewBtnHtml("analytics")}${viewBtnHtml("status")}${currentUser?.is_admin ? viewBtnHtml("settings") : ""}</div>
         ${showCyclePicker
           ? `<div class="cycle-picker-root" id="cycle-picker-root"></div>`
           : ""}
@@ -383,6 +411,24 @@ function render() {
 
   if (currentView === "rewards") {
     renderRewards($contentEl, $statusBarEl);
+  } else if (currentView === "analytics") {
+    const cycle = selectedCycle();
+    const analyticsProps: AnalyticsProps = {
+      cycle,
+      statusHtml: cycle ? cycleStatusHtml(cycle) : "",
+      summary: summaryCycleIndex === selectedCycleIndex ? summaryData : null,
+      summaryError: fetchError,
+    };
+    if (!analyticsLoaded) {
+      $contentEl.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading analytics…</p></div>`;
+    }
+    const pendingView = currentView;
+    void loadAnalytics().then((mod) => {
+      // The module may resolve after the user switched views (or rendered
+      // again), in which case $contentEl is detached — skip the mount.
+      if (currentView !== pendingView || !document.body.contains($contentEl)) return;
+      mod.renderAnalytics($contentEl, $statusBarEl, analyticsProps);
+    });
   } else if (currentView === "payouts") {
     renderPayouts($contentEl, $statusBarEl);
   } else if (currentView === "settings") {
@@ -1144,7 +1190,7 @@ function renderSettings($el: HTMLElement, $status: HTMLElement) {
     return;
   }
 
-  if (rewardDefs === null || cycleConfig === null) {
+  if (rewardDefs === null || cycleConfig === null || usersData === null) {
     $el.innerHTML = `<div class="loading-state"><div class="spinner"></div><p>Loading settings…</p></div>`;
     return;
   }
@@ -1462,6 +1508,25 @@ function showToast(msg: string) {
 
 // ── Data fetching ──────────────────────────────────────────────
 
+// Signature of everything that affects the rendered UI. fetchData()
+// compares it before each render so that background polls which found
+// no changes don't wipe the DOM (focus, scroll, in-progress input).
+let lastRenderSignature: string | null = null;
+
+function dataSignature(): string {
+  return JSON.stringify([
+    rewardDefs,
+    cycleConfig,
+    usersData,
+    cycles,
+    summaryCycleIndex,
+    summaryData,
+    payoutsData,
+    statusData,
+    fetchError,
+  ]);
+}
+
 async function fetchData() {
   if (!isAuthenticated() && !currentUser) {
     render();
@@ -1488,7 +1553,7 @@ async function fetchData() {
       cycles = await fetchCycles();
       selectedCycle();
     }
-    if (currentView === "rewards") {
+    if (currentView === "rewards" || currentView === "analytics") {
       await loadSummary();
     }
     payoutsData = await fetchPayoutRecords();
@@ -1507,8 +1572,12 @@ async function fetchData() {
   }
 
   isFetching = false;
-  if (payModalMember === null) {
-    render();
+  const signature = dataSignature();
+  if (signature !== lastRenderSignature) {
+    lastRenderSignature = signature;
+    if (payModalMember === null) {
+      render();
+    }
   }
 }
 
@@ -1534,6 +1603,7 @@ async function init() {
   if (currentUser || isAuthenticated()) {
     render();
     fetchData();
+    preloadApex();
     setInterval(fetchData, 60000);
     setInterval(refreshCountdowns, 30000);
     document.addEventListener("visibilitychange", () => {
