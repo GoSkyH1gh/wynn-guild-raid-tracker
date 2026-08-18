@@ -61,7 +61,6 @@ assert(
   app.querySelector<HTMLButtonElement>('[data-metric="detected"]')?.getAttribute("aria-pressed") === "true",
   "detected is the default metric",
 );
-assert(app.querySelectorAll("[data-raid]").length === 5, "raid chips rendered for 5 raids");
 assert(app.querySelectorAll("#ctl-member option").length === 4, "member select: all + 3 members");
 assert(app.querySelectorAll("#ctl-top option").length === 3, "top N select has 3 options");
 
@@ -80,11 +79,28 @@ assert(metricBtn?.getAttribute("aria-pressed") === "true", "metric toggle update
 await sleep(300);
 assert(app.querySelector("#chart-totals svg") !== null, "totals chart survives metric toggle (no remount)");
 
-const raidChip = app.querySelector<HTMLButtonElement>('[data-raid="wtp"]');
-raidChip?.click();
-assert(raidChip?.getAttribute("aria-pressed") === "false", "raid chip toggles off");
+// each chart's legend toggles raids (the totals legend is the new one)
+const totalsHost = app.querySelector("#chart-totals")!;
+const totalsLegend = totalsHost.querySelectorAll(".apexcharts-legend-series");
+assert(totalsLegend.length === 5, "totals legend lists all 5 raids");
+// collapsed bars stay in the DOM with fill="none", so count visible ones
+const visibleBars = () =>
+  [...totalsHost.querySelectorAll(".apexcharts-bar-area")].filter(
+    (el) => el.getAttribute("fill") !== "none",
+  ).length;
+const barsBefore = visibleBars();
+const clickFirstLegend = () => {
+  totalsHost
+    .querySelector<HTMLElement>(".apexcharts-legend-series")
+    ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+};
+clickFirstLegend();
 await sleep(300);
-assert(app.querySelector("#chart-top svg") !== null, "leaderboard chart survives raid toggle");
+assert(visibleBars() === barsBefore - 1, "legend click hides one raid on the totals chart");
+assert(totalsHost.querySelector("svg") !== null, "totals chart survives legend toggle");
+clickFirstLegend();
+await sleep(300);
+assert(visibleBars() === barsBefore, "second legend click restores the raid");
 
 // theme event triggers in-place rebuild
 document.dispatchEvent(new CustomEvent("themechange"));

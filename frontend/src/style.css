@@ -1607,8 +1607,7 @@ tr.voiding td {
   color: var(--text-muted);
 }
 
-.ctl-segmented,
-.ctl-chips {
+.ctl-segmented {
   display: flex;
   gap: 0.25rem;
 }
@@ -1620,44 +1619,6 @@ tr.voiding td {
 
 #ctl-member {
   width: 12rem; /* wider than the 5rem .settings-input default so names aren't cut off */
-}
-
-.chip-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-family: var(--font-display);
-  font-size: 0.75rem;
-  font-weight: 500;
-  padding: 0.35rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text-dim);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.chip-btn:hover {
-  color: var(--text);
-  background: var(--hover-bg);
-}
-
-.chip-btn:focus-visible {
-  outline: 2px solid var(--accent-text);
-  outline-offset: 1px;
-}
-
-.chip-btn.on {
-  color: var(--accent-text);
-  background: var(--active-bg);
-  border-color: var(--accent-light);
-}
-
-.chip-dot {
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 50%;
 }
 
 .chart-grid {

@@ -2,8 +2,6 @@ import {
   cycleTotals,
   memberLeaderboard,
   perDayTotals,
-  RUNE_TYPES,
-  type Metric,
 } from "./src/charts/series.js";
 import type { RewardSummary, RewardDay } from "./src/api.js";
 
@@ -61,42 +59,40 @@ assert(eq(cycleTotals([], "pending")[0]?.value, 0), "cycleTotals: empty summary 
 
 // ── perDayTotals ─────────────────────────────────────────────────
 
-const trend = perDayTotals(days, "detected", [...RUNE_TYPES]);
+const trend = perDayTotals(days, "detected");
 assert(eq(trend.categories, ["2026-08-01", "2026-08-02"]), "perDayTotals: categories are ISO days in order");
+assert(eq(trend.series.length, 5), "perDayTotals: one series per raid type");
+assert(eq(trend.series[0]?.name, "NOTG"), "perDayTotals: series names use short codes");
 const notgSeries = trend.series.find((s) => s.raidType === "notg");
 assert(eq(notgSeries?.data, [3, 1]), "perDayTotals: aggregates entries per day per raid (2+1, 1)");
 const nolSeries = trend.series.find((s) => s.raidType === "nol");
 assert(eq(nolSeries?.data, [1, 0]), "perDayTotals: raid with no entry on a day → 0");
-const pendingTrend = perDayTotals(days, "pending", [...RUNE_TYPES]);
+const pendingTrend = perDayTotals(days, "pending");
 const notgPending = pendingTrend.series.find((s) => s.raidType === "notg");
 assert(eq(notgPending?.data, [2, 1]), "perDayTotals: pending metric respects eligibility zeros");
-const filtered = perDayTotals(days, "detected", ["notg"]);
-assert(eq(filtered.series.length, 1) && eq(filtered.series[0]?.raidType, "notg"), "perDayTotals: enabled filter");
-const eligibleTrend = perDayTotals(days, "eligible", [...RUNE_TYPES]);
+const eligibleTrend = perDayTotals(days, "eligible");
 const notgEligible = eligibleTrend.series.find((s) => s.raidType === "notg");
 assert(eq(notgEligible?.data, [2, 1]), "perDayTotals: eligible metric = paid + pending per day");
 const nolEligible = eligibleTrend.series.find((s) => s.raidType === "nol");
 assert(eq(nolEligible?.data, [1, 0]), "perDayTotals: eligible includes paid for uncapped nol");
-assert(eq(perDayTotals([], "detected", [...RUNE_TYPES]).categories.length, 0), "perDayTotals: empty days");
+assert(eq(perDayTotals([], "detected").categories.length, 0), "perDayTotals: empty days");
 
 // ── memberLeaderboard ────────────────────────────────────────────
 
-const board = memberLeaderboard(summary, "pending", 10, [...RUNE_TYPES]);
+const board = memberLeaderboard(summary, "pending", 10);
 assert(eq(board.length, 3), "leaderboard: one bar per member with rows");
 assert(eq(board[0]?.username, "Alice"), "leaderboard: sorted by total desc (Alice 3 pending)");
-assert(eq(board[0]?.total, 3), "leaderboard: total sums the metric over enabled raids");
-assert(eq(board[0]?.segments.map((s) => s.raidType), ["notg", "nol"]), "leaderboard: segments in RUNE_TYPES order");
+assert(eq(board[0]?.total, 3), "leaderboard: total sums the metric over all raids");
+assert(eq(board[0]?.segments.map((s) => s.raidType), ["notg", "nol"]), "leaderboard: segments only for raids the member has entries for");
 assert(eq(board[0]?.eligible, true), "leaderboard: eligibility flag");
 assert(eq(board.find((b) => b.username === "Bob")?.eligible, false), "leaderboard: ineligible flag (Bob)");
-const top2 = memberLeaderboard(summary, "pending", 2, [...RUNE_TYPES]);
+const top2 = memberLeaderboard(summary, "pending", 2);
 assert(eq(top2.length, 2), "leaderboard: topN slicing");
-const detectedBoard = memberLeaderboard(summary, "detected", 10, [...RUNE_TYPES]);
+const detectedBoard = memberLeaderboard(summary, "detected", 10);
 assert(eq(detectedBoard[0]?.username, "Alice") && eq(detectedBoard[0]?.total, 7), "leaderboard: detected metric ignores bogus raid");
-const eligibleBoard = memberLeaderboard(summary, "eligible", 10, [...RUNE_TYPES]);
+const eligibleBoard = memberLeaderboard(summary, "eligible", 10);
 assert(eq(eligibleBoard[0]?.username, "Alice") && eq(eligibleBoard[0]?.total, 6), "leaderboard: eligible metric = paid + pending (Alice 4+2)");
-const raidsOnly = memberLeaderboard(summary, "pending", 10, ["nol"]);
-assert(eq(raidsOnly[0]?.total, 0), "leaderboard: raid filter restricts segments");
-assert(eq(memberLeaderboard([], "pending", 5, [...RUNE_TYPES]).length, 0), "leaderboard: empty summary");
+assert(eq(memberLeaderboard([], "pending", 5).length, 0), "leaderboard: empty summary");
 
 console.log(results.join("\n"));
 console.log(`\n${results.length} assertions passed`);

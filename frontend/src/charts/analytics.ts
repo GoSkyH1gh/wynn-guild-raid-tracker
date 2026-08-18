@@ -16,7 +16,6 @@ import {
   type Metric,
   type PerDaySeries,
   type RaidTotal,
-  type Rune,
 } from "./series.js";
 
 type ApexCtor = typeof ApexCharts;
@@ -38,7 +37,6 @@ export interface AnalyticsProps {
 
 let metric: Metric = "detected";
 let memberUuid: string | null = null; // null = all members
-let enabledRaids: Set<Rune> = new Set(RUNE_TYPES);
 let topN = 10;
 
 let active = false;
@@ -51,6 +49,13 @@ let lastCycle: Cycle | null = null;
 let trendData: RewardDay[] | null = null;
 let trendCache = new Map<string, RewardDay[] | null>();
 let trendFetchKey: string | null = null;
+
+/**
+ * Raid indices (RUNE_TYPES order) collapsed via the totals chart's legend.
+ * ApexCharts disables native legend toggling for distributed bars, so this
+ * view implements it by nulling the data point (mirroring native behavior).
+ */
+const collapsedTotalRaids = new Set<number>();
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => {
@@ -67,10 +72,6 @@ function escapeHtml(s: string): string {
         return "&#39;";
     }
   });
-}
-
-function activeRaids(): Rune[] {
-  return RUNE_TYPES.filter((rt) => enabledRaids.has(rt));
 }
 
 function trendKey(cycle: Cycle): string {
@@ -153,11 +154,6 @@ function controlsHtml(summary: RewardSummary[]): string {
       `<button type="button" class="view-btn${metric === m ? " active" : ""}" data-metric="${m}" aria-pressed="${metric === m}" title="${escapeHtml(METRIC_HINT[m])}">${METRIC_LABEL[m]}</button>`,
   ).join("");
 
-  const raidChips = RUNE_TYPES.map((rt) => {
-    const on = enabledRaids.has(rt);
-    return `<button type="button" class="chip-btn${on ? " on" : ""}" data-raid="${rt}" aria-pressed="${on}" title="${escapeHtml(RUNE_META[rt].name)}"><span class="chip-dot" style="background: var(--rune-${rt})"></span>${RUNE_META[rt].short}</button>`;
-  }).join("");
-
   const topOptions = [5, 10, 20]
     .map((n) => `<option value="${n}"${topN === n ? " selected" : ""}>${n}</option>`)
     .join("");
@@ -174,10 +170,6 @@ function controlsHtml(summary: RewardSummary[]): string {
           <option value="">All members</option>
           ${memberOptions}
         </select>
-      </div>
-      <div class="ctl-group">
-        <span class="ctl-label" id="ctl-raids-label">Raids</span>
-        <div class="ctl-chips" role="group" aria-labelledby="ctl-raids-label">${raidChips}</div>
       </div>
       <div class="ctl-group">
         <label class="ctl-label" for="ctl-top">Top</label>
@@ -216,15 +208,6 @@ function bindControls(): void {
       refreshCharts();
     });
   });
-  document.querySelectorAll<HTMLButtonElement>("[data-raid]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const rt = btn.dataset.raid as Rune;
-      if (enabledRaids.has(rt)) enabledRaids.delete(rt);
-      else enabledRaids.add(rt);
-      syncControlState();
-      refreshCharts();
-    });
-  });
   document.getElementById("ctl-member")?.addEventListener("change", (e) => {
     const value = (e.target as HTMLSelectElement).value || null;
     void changeMember(value);
@@ -239,12 +222,6 @@ function syncControlState(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-metric]").forEach((btn) => {
     const on = btn.dataset.metric === metric;
     btn.classList.toggle("active", on);
-    btn.setAttribute("aria-pressed", String(on));
-  });
-  document.querySelectorAll<HTMLButtonElement>("[data-raid]").forEach((btn) => {
-    const rt = btn.dataset.raid as Rune;
-    const on = enabledRaids.has(rt);
-    btn.classList.toggle("on", on);
     btn.setAttribute("aria-pressed", String(on));
   });
 }
@@ -287,14 +264,14 @@ function mountAllCharts(Apex: ApexCtor): void {
     "chart-top",
     "top",
     Apex,
-    topOptions(memberLeaderboard(lastSummary, metric, topN, activeRaids()), colors, mode),
+    topOptions(memberLeaderboard(lastSummary, metric, topN), colors, mode),
   );
   if (trendData) {
     createChart(
       "chart-trend",
       "trend",
       Apex,
-      trendOptions(perDayTotals(trendData, metric, activeRaids()), colors, mode),
+      trendOptions(perDayTotals(trendData, metric), colors, mode),
     );
   }
 }
@@ -341,10 +318,10 @@ function refreshCharts(): void {
     } else if (lc.role === "top") {
       applyOptions(
         lc,
-        topOptions(memberLeaderboard(lastSummary, metric, topN, activeRaids()), colors, mode),
+        topOptions(memberLeaderboard(lastSummary, metric, topN), colors, mode),
       );
     } else if (lc.role === "trend" && trendData) {
-      applyOptions(lc, trendOptions(perDayTotals(trendData, metric, activeRaids()), colors, mode));
+      applyOptions(lc, trendOptions(perDayTotals(trendData, metric), colors, mode));
     }
   }
 }
@@ -395,7 +372,7 @@ function updateTrendChart(): void {
   const existing = charts.find((c) => c.role === "trend");
   const colors = chartColors();
   const mode = chartMode();
-  const options = trendOptions(perDayTotals(trendData, metric, activeRaids()), colors, mode);
+  const options = trendOptions(perDayTotals(trendData, metric), colors, mode);
   if (existing) applyOptions(existing, options);
   else createChart("chart-trend", "trend", apexCtor, options);
 }
@@ -449,15 +426,58 @@ function chartScaffold(
   };
 }
 
+function toggleTotalRaid(index: number): void {
+  const lc = charts.find((c) => c.role === "totals");
+  if (!lc || !lastSummary) return;
+  const collapsed = !collapsedTotalRaids.has(index);
+  if (collapsed) collapsedTotalRaids.add(index);
+  else collapsedTotalRaids.delete(index);
+  const data = cycleTotals(lastSummary, metric).map((t, i) =>
+    collapsedTotalRaids.has(i) ? null : t.value,
+  );
+  void lc.api
+    .updateOptions({ series: [{ name: METRIC_LABEL[metric], data }] }, false, true)
+    .then(() => {
+      syncTotalsLegendItem(index, collapsed);
+      // updateOptions' legend re-render can land after the promise, so re-sync.
+      window.setTimeout(() => syncTotalsLegendItem(index, collapsed), 50);
+    });
+}
+
+/** Keep the totals legend item's visual state in sync after a re-render. */
+function syncTotalsLegendItem(index: number, collapsed: boolean): void {
+  const item = document.querySelector(
+    `#chart-totals .apexcharts-legend-series[rel="${index + 1}"]`,
+  );
+  if (!item) return;
+  item.setAttribute("data:collapsed", String(collapsed));
+  item.setAttribute("aria-pressed", String(collapsed));
+  (item as HTMLElement).style.opacity = collapsed ? "0.45" : "1";
+}
+
 function totalsOptions(
   data: RaidTotal[],
   colors: ChartColors,
   mode: ChartMode,
 ): ApexCharts.ApexOptions {
   const label = METRIC_LABEL[metric];
+  const scaffold = chartScaffold(mode, colors, "bar", 320, false);
   return {
-    ...chartScaffold(mode, colors, "bar", 320, false),
-    series: [{ name: label, data: data.map((d) => d.value) }],
+    ...scaffold,
+    chart: {
+      ...scaffold.chart,
+      events: {
+        legendClick: (_chart: ApexCharts, seriesIndex?: number) => {
+          toggleTotalRaid(seriesIndex ?? 0);
+        },
+      },
+    },
+    series: [
+      {
+        name: label,
+        data: data.map((d, i) => (collapsedTotalRaids.has(i) ? null : d.value)),
+      },
+    ],
     colors: RUNE_TYPES.map((rt) => colors.runes[rt]),
     plotOptions: { bar: { distributed: true, borderRadius: 3, columnWidth: "55%" } },
     xaxis: {
@@ -468,7 +488,11 @@ function totalsOptions(
       labels: { style: { colors: colors.text } },
       title: { text: label, style: { color: colors.muted } },
     },
-    legend: { show: false },
+    legend: {
+      position: "bottom",
+      labels: { colors: colors.muted },
+      onItemClick: { toggleDataSeries: true },
+    },
     tooltip: {
       theme: mode,
       y: {
@@ -513,14 +537,13 @@ function topOptions(
   mode: ChartMode,
 ): ApexCharts.ApexOptions {
   const label = METRIC_LABEL[metric];
-  const raids = activeRaids();
   return {
     ...chartScaffold(mode, colors, "bar", Math.max(160, bars.length * 34 + 100), true),
-    series: raids.map((rt) => ({
-      name: RUNE_META[rt].name,
+    series: RUNE_TYPES.map((rt) => ({
+      name: RUNE_META[rt].short,
       data: bars.map((b) => b.segments.find((s) => s.raidType === rt)?.value ?? 0),
     })),
-    colors: raids.map((rt) => colors.runes[rt]),
+    colors: RUNE_TYPES.map((rt) => colors.runes[rt]),
     plotOptions: { bar: { horizontal: true, borderRadius: 2 } },
     xaxis: {
       categories: bars.map((b) => b.username),

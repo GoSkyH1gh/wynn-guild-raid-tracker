@@ -92,18 +92,13 @@ export function cycleTotals(summary: RewardSummary[], metric: Metric): RaidTotal
 export interface PerDaySeries {
   /** ISO day strings ("YYYY-MM-DD"), one per RewardDay. */
   categories: string[];
-  /** One series per enabled raid type, in RUNE_TYPES order. */
+  /** One series per raid type, in RUNE_TYPES order. */
   series: { name: string; raidType: Rune; data: number[] }[];
 }
 
-export function perDayTotals(
-  days: RewardDay[],
-  metric: Metric,
-  enabled: Rune[],
-): PerDaySeries {
-  const enabledSet = new Set<Rune>(enabled);
-  const series = RUNE_TYPES.filter((rt) => enabledSet.has(rt)).map((rt) => ({
-    name: RUNE_META[rt].name,
+export function perDayTotals(days: RewardDay[], metric: Metric): PerDaySeries {
+  const series = RUNE_TYPES.map((rt) => ({
+    name: RUNE_META[rt].short,
     raidType: rt,
     data: days.map(() => 0),
   }));
@@ -125,9 +120,9 @@ export interface MemberBar {
   username: string;
   rank: string;
   eligible: boolean;
-  /** Sum of the selected metric over the enabled raids. */
+  /** Sum of the selected metric over all raid types. */
   total: number;
-  /** One segment per enabled raid type, in RUNE_TYPES order. */
+  /** One segment per raid type, in RUNE_TYPES order. */
   segments: { raidType: Rune; value: number }[];
 }
 
@@ -135,12 +130,10 @@ export function memberLeaderboard(
   summary: RewardSummary[],
   metric: Metric,
   topN: number,
-  enabled: Rune[],
 ): MemberBar[] {
-  const enabledSet = new Set<Rune>(enabled);
   const byMember = new Map<string, MemberBar>();
   for (const r of summary) {
-    if (!isRune(r.raid_type) || !enabledSet.has(r.raid_type)) continue;
+    if (!isRune(r.raid_type)) continue;
     let m = byMember.get(r.member_uuid);
     if (!m) {
       m = {
