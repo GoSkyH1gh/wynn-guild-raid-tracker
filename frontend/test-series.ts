@@ -1,6 +1,7 @@
 import {
   cycleTotals,
   memberLeaderboard,
+  payoutBreakdown,
   perDayTotals,
   raidersPerDay,
   rankTotals,
@@ -110,6 +111,19 @@ assert(eq(rankTotals(summary, "pending").values[2], 0), "rankTotals: selected me
 assert(eq(rankTotals(summary, "eligible").ranks[0], "Recruit"), "rankTotals: eligible = paid + pending (Alice first)");
 assert(eq(rankTotals([], "detected").values.length, 0), "rankTotals: empty summary → no ranks");
 assert(eq(rankTotals([{ ...summary[0]!, rank: "" }], "detected").values.length, 0), "rankTotals: empty rank rows skipped");
+
+// ── payoutBreakdown ─────────────────────────────────────────────
+
+const payout = payoutBreakdown(summary);
+const payoutNotg = payout.find((t) => t.raidType === "notg");
+assert(eq(payoutNotg?.eligible, 10), "payoutBreakdown: eligible = payable of paying ranks (Alice 4 + Carol 6)");
+assert(eq(payoutNotg?.overCap, 2), "payoutBreakdown: overCap = excess of paying ranks (Alice 1 + Carol 1)");
+assert(eq(payoutNotg?.ineligible, 1), "payoutBreakdown: ineligible = high-rank detected (Bob 1)");
+assert(eq(payoutNotg?.eligible! + payoutNotg?.overCap! + payoutNotg?.ineligible!, 13), "payoutBreakdown: segments sum to detected");
+const payoutNol = payout.find((t) => t.raidType === "nol");
+assert(eq(payoutNol, { raidType: "nol", eligible: 2, overCap: 0, ineligible: 0 }), "payoutBreakdown: uncapped raid splits cleanly");
+const payoutEmpty = payoutBreakdown([]);
+assert(eq(payoutEmpty.every((t) => t.eligible === 0 && t.overCap === 0 && t.ineligible === 0), true), "payoutBreakdown: empty summary → zeros");
 
 console.log(results.join("\n"));
 console.log(`\n${results.length} assertions passed`);

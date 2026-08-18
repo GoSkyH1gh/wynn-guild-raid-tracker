@@ -198,3 +198,40 @@ export function rankTotals(summary: RewardSummary[], metric: Metric): RankTotals
     values: ranks.map((rank) => totals.get(rank)!),
   };
 }
+
+// ── Chart F: detected completions by payout outcome ──
+
+export interface PayoutBreakdown {
+  raidType: Rune;
+  /** Counts toward payout: paying rank, within the daily cap. */
+  eligible: number;
+  /** Paying-rank completions above the daily cap. */
+  overCap: number;
+  /** Detected completions by members whose rank earns no payout. */
+  ineligible: number;
+}
+
+/**
+ * Splits detected completions per raid into what counts toward payout
+ * (payable: eligible rank + daily cap), what the daily cap excludes, and
+ * what the rank gate excludes (only REWARD_RANKS in tracker.py earn payouts).
+ */
+export function payoutBreakdown(summary: RewardSummary[]): PayoutBreakdown[] {
+  const totals = new Map<Rune, PayoutBreakdown>(
+    RUNE_TYPES.map((rt) => [
+      rt,
+      { raidType: rt, eligible: 0, overCap: 0, ineligible: 0 },
+    ]),
+  );
+  for (const r of summary) {
+    if (!isRune(r.raid_type)) continue;
+    const t = totals.get(r.raid_type)!;
+    if (r.is_eligible) {
+      t.eligible += r.payable;
+      t.overCap += Math.max(0, r.detected - r.payable);
+    } else {
+      t.ineligible += r.detected;
+    }
+  }
+  return RUNE_TYPES.map((rt) => totals.get(rt)!);
+}

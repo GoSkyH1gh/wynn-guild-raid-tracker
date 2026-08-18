@@ -93,7 +93,7 @@ assert(app.querySelector("#top-title")?.textContent === "Top 20 members", "leade
 await sleep(2500);
 
 const svgs = app.querySelectorAll(
-  "#chart-totals svg, #chart-trend svg, #chart-top svg, #chart-raiders svg, #chart-rank svg, #chart-overcap svg",
+  "#chart-totals svg, #chart-trend svg, #chart-top svg, #chart-raiders svg, #chart-rank svg, #chart-payout svg",
 );
 assert(svgs.length >= 6, `charts mounted (svg found ${svgs.length} across 6 hosts)`);
 assert(app.querySelector("#chart-raiders svg") !== null, "raiders chart mounts from per-day data");
@@ -108,13 +108,15 @@ await sleep(300);
 assert(app.querySelector("#chart-totals svg") !== null, "totals chart survives metric toggle (no remount)");
 
 // all legends share the same circle marker style: totals 5 + trend 5 + top 5
-// + rank 3 + over-cap 2 = 20 (raiders is a single series → legend hidden)
+// + rank 3 + payout 3 = 21 (raiders is a single series → legend hidden)
 const circleMarkers = app.querySelectorAll(".apexcharts-legend-marker.apexcharts-marker-circle");
 const squareMarkers = app.querySelectorAll(".apexcharts-legend-marker.apexcharts-marker-square");
-assert(circleMarkers.length === 20, "all legends use circle markers (20 total)");
+assert(circleMarkers.length === 21, "all legends use circle markers (21 total)");
 assert(squareMarkers.length === 0, "no square legend markers remain");
 assert(app.querySelectorAll("#chart-rank .apexcharts-legend-series").length === 3, "rank donut lists the 3 fixture ranks");
-assert(app.querySelectorAll("#chart-overcap .apexcharts-legend-series").length === 2, "over-cap chart lists counted/over-cap");
+assert(app.querySelectorAll("#chart-payout .apexcharts-legend-series").length === 3, "payout chart lists eligible/over-cap/not-eligible");
+assert(app.querySelector("#chart-payout .apexcharts-legend-text")?.textContent === "Eligible", "payout legend starts with Eligible");
+assert(app.querySelector("#payout-title")?.textContent === "Completions by payout status", "payout card copy describes the split");
 
 // each chart's legend toggles raids (the totals legend is the new one)
 const totalsHost = app.querySelector("#chart-totals")!;

@@ -6,6 +6,7 @@ import { chartColors, chartMode, type ChartColors, type ChartMode } from "./them
 import {
   cycleTotals,
   memberLeaderboard,
+  payoutBreakdown,
   perDayTotals,
   raidersPerDay,
   rankTotals,
@@ -16,6 +17,7 @@ import {
   RUNE_TYPES,
   type MemberBar,
   type Metric,
+  type PayoutBreakdown,
   type PerDaySeries,
   type RaidTotal,
   type RankTotals,
@@ -24,7 +26,7 @@ import {
 type ApexCtor = typeof ApexCharts;
 
 interface LiveChart {
-  role: "totals" | "trend" | "top" | "raiders" | "rank" | "overcap";
+  role: "totals" | "trend" | "top" | "raiders" | "rank" | "payout";
   api: ApexCharts;
 }
 
@@ -179,10 +181,10 @@ function chartsHtml(): string {
           <h2 id="rank-title">Completions by rank</h2>
           <div class="chart-host" id="chart-rank"><div class="chart-loading"><span class="spinner"></span><p>Loading…</p></div></div>
         </section>
-        <section class="chart-card" aria-labelledby="overcap-title">
-          <h2 id="overcap-title">Over-cap completions</h2>
-          <p class="chart-note">Detected completions above the daily cap, per raid.</p>
-          <div class="chart-host" id="chart-overcap"><div class="chart-loading"><span class="spinner"></span><p>Loading…</p></div></div>
+        <section class="chart-card" aria-labelledby="payout-title">
+          <h2 id="payout-title">Completions by payout status</h2>
+          <p class="chart-note">Eligible = counts toward payout. High ranks and above-cap runs don't.</p>
+          <div class="chart-host" id="chart-payout"><div class="chart-loading"><span class="spinner"></span><p>Loading…</p></div></div>
         </section>
       </div>
     </div>`;
@@ -235,10 +237,10 @@ function mountAllCharts(Apex: ApexCtor): void {
     rankOptions(rankTotals(lastSummary, metric), colors, mode),
   );
   createChart(
-    "chart-overcap",
-    "overcap",
+    "chart-payout",
+    "payout",
     Apex,
-    overcapOptions(cycleTotals(lastSummary, "detected"), colors, mode),
+    payoutOptions(payoutBreakdown(lastSummary), colors, mode),
   );
   if (trendData) {
     createChart(
@@ -642,22 +644,27 @@ function rankOptions(
   };
 }
 
-/** Stacked "counted vs over-cap" bars — always detected-based (metric-independent). */
-function overcapOptions(
-  totals: RaidTotal[],
+/**
+ * Stacked bars splitting detected completions into what counts toward
+ * payout, what the daily cap excludes, and what the rank gate excludes.
+ * Always detected-based (metric-independent).
+ */
+function payoutOptions(
+  data: PayoutBreakdown[],
   colors: ChartColors,
   mode: ChartMode,
 ): ApexCharts.ApexOptions {
   return {
     ...chartScaffold(mode, colors, "bar", 320, true),
     series: [
-      { name: "Counted", data: totals.map((t) => t.detected - t.overCap) },
-      { name: "Over cap", data: totals.map((t) => t.overCap) },
+      { name: "Eligible", data: data.map((t) => t.eligible) },
+      { name: "Over cap", data: data.map((t) => t.overCap) },
+      { name: "Not eligible", data: data.map((t) => t.ineligible) },
     ],
-    colors: [colors.text, colors.warn],
+    colors: [colors.text, colors.warn, colors.muted],
     plotOptions: { bar: { borderRadius: 2, columnWidth: "55%" } },
     xaxis: {
-      categories: totals.map((t) => RUNE_META[t.raidType].short),
+      categories: data.map((t) => RUNE_META[t.raidType].short),
       labels: { style: { colors: colors.text } },
     },
     yaxis: {
