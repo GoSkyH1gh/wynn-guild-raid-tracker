@@ -1652,7 +1652,7 @@ tr.voiding td {
 /* ApexCharts ships no spacing between the legend marker and its label
    (.apexcharts-legend-text's padding/margin cancel out), so add it here. */
 .chart-card .apexcharts-legend-marker {
-  margin-right: 8px;
+  margin-right: 4px;
 }
 
 .chart-host {

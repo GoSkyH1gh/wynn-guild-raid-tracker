@@ -61,8 +61,9 @@ assert(
   app.querySelector<HTMLButtonElement>('[data-metric="detected"]')?.getAttribute("aria-pressed") === "true",
   "detected is the default metric",
 );
-assert(app.querySelectorAll("#ctl-member option").length === 4, "member select: all + 3 members");
-assert(app.querySelectorAll("#ctl-top option").length === 3, "top N select has 3 options");
+assert(app.querySelector("#ctl-member") === null, "player filter removed");
+assert(app.querySelector("#ctl-top") === null, "top-N selector removed");
+assert(app.querySelector("#top-title")?.textContent === "Top 20 members", "leaderboard title shows Top 20");
 
 // wait for the lazy apexcharts import + chart render
 await sleep(2500);

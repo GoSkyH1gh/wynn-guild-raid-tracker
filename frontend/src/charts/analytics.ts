@@ -36,8 +36,9 @@ export interface AnalyticsProps {
 // ── view state (module-level, mirrors main.ts style; survives re-renders) ──
 
 let metric: Metric = "detected";
-let memberUuid: string | null = null; // null = all members
-let topN = 10;
+
+/** Members shown in the leaderboard (fixed, shown in the card title). */
+const TOP_MEMBERS = 20;
 
 let active = false;
 let generation = 0; // bumped by teardown; aborts in-flight mounts
@@ -75,7 +76,7 @@ function escapeHtml(s: string): string {
 }
 
 function trendKey(cycle: Cycle): string {
-  return `${cycle.index}:${memberUuid ?? "*"}`;
+  return `${cycle.index}`;
 }
 
 function fmtDayShort(isoDay: string): string {
@@ -110,7 +111,7 @@ export function renderAnalytics(
   lastSummary = props.summary;
   lastCycle = props.cycle;
 
-  $el.innerHTML = controlsHtml(props.summary) + chartsHtml();
+  $el.innerHTML = controlsHtml() + chartsHtml();
   bindControls();
   syncControlState();
 
@@ -136,46 +137,17 @@ export function renderAnalytics(
   })();
 }
 
-function controlsHtml(summary: RewardSummary[]): string {
-  const memberNames = new Map<string, string>();
-  for (const r of summary) {
-    if (!memberNames.has(r.member_uuid)) memberNames.set(r.member_uuid, r.username);
-  }
-  const memberOptions = [...memberNames.entries()]
-    .sort((a, b) => a[1]!.localeCompare(b[1]!))
-    .map(
-      ([uuid, name]) =>
-        `<option value="${escapeHtml(uuid)}"${uuid === memberUuid ? " selected" : ""}>${escapeHtml(name)}</option>`,
-    )
-    .join("");
-
+function controlsHtml(): string {
   const metricButtons = METRIC_ORDER.map(
     (m) =>
       `<button type="button" class="view-btn${metric === m ? " active" : ""}" data-metric="${m}" aria-pressed="${metric === m}" title="${escapeHtml(METRIC_HINT[m])}">${METRIC_LABEL[m]}</button>`,
   ).join("");
-
-  const topOptions = [5, 10, 20]
-    .map((n) => `<option value="${n}"${topN === n ? " selected" : ""}>${n}</option>`)
-    .join("");
 
   return `
     <div class="analytics-controls">
       <div class="ctl-group">
         <span class="ctl-label" id="ctl-metric-label">Metric</span>
         <div class="ctl-segmented" role="group" aria-labelledby="ctl-metric-label">${metricButtons}</div>
-      </div>
-      <div class="ctl-group">
-        <label class="ctl-label" for="ctl-member">Player</label>
-        <select id="ctl-member" class="settings-input" aria-label="Filter charts by player">
-          <option value="">All members</option>
-          ${memberOptions}
-        </select>
-      </div>
-      <div class="ctl-group">
-        <label class="ctl-label" for="ctl-top">Top</label>
-        <select id="ctl-top" class="settings-input" aria-label="Number of members shown in the leaderboard">
-          ${topOptions}
-        </select>
       </div>
     </div>`;
 }
@@ -192,7 +164,7 @@ function chartsHtml(): string {
         <div class="chart-host" id="chart-trend"><div class="chart-loading"><span class="spinner"></span><p>Loading…</p></div></div>
       </section>
       <section class="chart-card chart-card-wide" aria-labelledby="top-title">
-        <h2 id="top-title">Top members</h2>
+        <h2 id="top-title">Top ${TOP_MEMBERS} members</h2>
         <div class="chart-host" id="chart-top"><div class="chart-loading"><span class="spinner"></span><p>Loading…</p></div></div>
       </section>
     </div>`;
@@ -208,14 +180,6 @@ function bindControls(): void {
       refreshCharts();
     });
   });
-  document.getElementById("ctl-member")?.addEventListener("change", (e) => {
-    const value = (e.target as HTMLSelectElement).value || null;
-    void changeMember(value);
-  });
-  document.getElementById("ctl-top")?.addEventListener("change", (e) => {
-    topN = Number((e.target as HTMLSelectElement).value) || 10;
-    refreshCharts();
-  });
 }
 
 function syncControlState(): void {
@@ -224,26 +188,6 @@ function syncControlState(): void {
     btn.classList.toggle("active", on);
     btn.setAttribute("aria-pressed", String(on));
   });
-}
-
-async function changeMember(uuid: string | null): Promise<void> {
-  memberUuid = uuid;
-  trendData = null;
-  const existing = charts.find((c) => c.role === "trend");
-  if (existing) {
-    try {
-      existing.api.destroy();
-    } catch {
-      // ignore
-    }
-    charts = charts.filter((c) => c !== existing);
-  }
-  const host = document.getElementById("chart-trend");
-  if (host) {
-    host.innerHTML = `<div class="chart-loading"><span class="spinner"></span><p>Loading…</p></div>`;
-  }
-  refreshCharts(); // totals + leaderboard are summary-based; update immediately
-  await ensureTrendData(generation);
 }
 
 // ── chart lifecycle ──
@@ -264,7 +208,7 @@ function mountAllCharts(Apex: ApexCtor): void {
     "chart-top",
     "top",
     Apex,
-    topOptions(memberLeaderboard(lastSummary, metric, topN), colors, mode),
+    topOptions(memberLeaderboard(lastSummary, metric, TOP_MEMBERS), colors, mode),
   );
   if (trendData) {
     createChart(
@@ -318,7 +262,7 @@ function refreshCharts(): void {
     } else if (lc.role === "top") {
       applyOptions(
         lc,
-        topOptions(memberLeaderboard(lastSummary, metric, topN), colors, mode),
+        topOptions(memberLeaderboard(lastSummary, metric, TOP_MEMBERS), colors, mode),
       );
     } else if (lc.role === "trend" && trendData) {
       applyOptions(lc, trendOptions(perDayTotals(trendData, metric), colors, mode));
@@ -348,7 +292,6 @@ async function ensureTrendData(gen: number): Promise<void> {
     data = await fetchRewardPerDay(
       new Date(cycle.start).toISOString(),
       new Date(cycle.end).toISOString(),
-      memberUuid ?? undefined,
     );
   } catch (err) {
     data = null;
