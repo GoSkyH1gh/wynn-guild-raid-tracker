@@ -7,6 +7,8 @@ import {
   cycleTotals,
   memberLeaderboard,
   perDayTotals,
+  raidersPerDay,
+  rankTotals,
   METRIC_HINT,
   METRIC_LABEL,
   METRIC_ORDER,
@@ -16,12 +18,13 @@ import {
   type Metric,
   type PerDaySeries,
   type RaidTotal,
+  type RankTotals,
 } from "./series.js";
 
 type ApexCtor = typeof ApexCharts;
 
 interface LiveChart {
-  role: "totals" | "trend" | "top";
+  role: "totals" | "trend" | "top" | "raiders" | "rank" | "overcap";
   api: ApexCharts;
 }
 
@@ -167,6 +170,21 @@ function chartsHtml(): string {
         <h2 id="top-title">Top ${TOP_MEMBERS} members</h2>
         <div class="chart-host" id="chart-top"><div class="chart-loading"><span class="spinner"></span><p>Loading…</p></div></div>
       </section>
+      <div class="chart-grid-three">
+        <section class="chart-card" aria-labelledby="raiders-title">
+          <h2 id="raiders-title">Active raiders per day</h2>
+          <div class="chart-host" id="chart-raiders"><div class="chart-loading"><span class="spinner"></span><p>Loading…</p></div></div>
+        </section>
+        <section class="chart-card" aria-labelledby="rank-title">
+          <h2 id="rank-title">Completions by rank</h2>
+          <div class="chart-host" id="chart-rank"><div class="chart-loading"><span class="spinner"></span><p>Loading…</p></div></div>
+        </section>
+        <section class="chart-card" aria-labelledby="overcap-title">
+          <h2 id="overcap-title">Over-cap completions</h2>
+          <p class="chart-note">Detected completions above the daily cap, per raid.</p>
+          <div class="chart-host" id="chart-overcap"><div class="chart-loading"><span class="spinner"></span><p>Loading…</p></div></div>
+        </section>
+      </div>
     </div>`;
 }
 
@@ -210,12 +228,30 @@ function mountAllCharts(Apex: ApexCtor): void {
     Apex,
     topOptions(memberLeaderboard(lastSummary, metric, TOP_MEMBERS), colors, mode),
   );
+  createChart(
+    "chart-rank",
+    "rank",
+    Apex,
+    rankOptions(rankTotals(lastSummary, metric), colors, mode),
+  );
+  createChart(
+    "chart-overcap",
+    "overcap",
+    Apex,
+    overcapOptions(cycleTotals(lastSummary, "detected"), colors, mode),
+  );
   if (trendData) {
     createChart(
       "chart-trend",
       "trend",
       Apex,
       trendOptions(perDayTotals(trendData, metric), colors, mode),
+    );
+    createChart(
+      "chart-raiders",
+      "raiders",
+      Apex,
+      raidersOptions(trendData, colors, mode),
     );
   }
 }
@@ -264,6 +300,8 @@ function refreshCharts(): void {
         lc,
         topOptions(memberLeaderboard(lastSummary, metric, TOP_MEMBERS), colors, mode),
       );
+    } else if (lc.role === "rank") {
+      applyOptions(lc, rankOptions(rankTotals(lastSummary, metric), colors, mode));
     } else if (lc.role === "trend" && trendData) {
       applyOptions(lc, trendOptions(perDayTotals(trendData, metric), colors, mode));
     }
@@ -282,7 +320,10 @@ async function ensureTrendData(gen: number): Promise<void> {
   const key = trendKey(cycle);
   if (trendCache.has(key)) {
     trendData = trendCache.get(key) ?? null;
-    if (gen === generation && active) updateTrendChart();
+    if (gen === generation && active) {
+      updateTrendChart();
+      updateRaidersChart();
+    }
     return;
   }
   if (trendFetchKey === key) return; // already in flight
@@ -311,6 +352,10 @@ async function ensureTrendData(gen: number): Promise<void> {
           { once: true },
         );
       }
+      const raidersHost = document.getElementById("chart-raiders");
+      if (raidersHost) {
+        raidersHost.innerHTML = `<p class="chart-note">Per-day data unavailable.</p>`;
+      }
     }
   }
   trendCache.set(key, data);
@@ -318,7 +363,10 @@ async function ensureTrendData(gen: number): Promise<void> {
     trendData = data;
     trendFetchKey = null;
   }
-  if (gen === generation && active) updateTrendChart();
+  if (gen === generation && active) {
+    updateTrendChart();
+    updateRaidersChart();
+  }
 }
 
 function updateTrendChart(): void {
@@ -329,6 +377,15 @@ function updateTrendChart(): void {
   const options = trendOptions(perDayTotals(trendData, metric), colors, mode);
   if (existing) applyOptions(existing, options);
   else createChart("chart-trend", "trend", apexCtor, options);
+}
+
+/** Raiders chart rides on the same per-day fetch as the trend chart. */
+function updateRaidersChart(): void {
+  if (!active || !apexCtor || !trendData) return;
+  const existing = charts.find((c) => c.role === "raiders");
+  const options = raidersOptions(trendData, chartColors(), chartMode());
+  if (existing) applyOptions(existing, options);
+  else createChart("chart-raiders", "raiders", apexCtor, options);
 }
 
 // ── theme changes: rebuild in place (no full re-render) ──
@@ -368,7 +425,7 @@ function bottomLegend(
 function chartScaffold(
   mode: ChartMode,
   colors: ChartColors,
-  type: "bar" | "area",
+  type: "bar" | "area" | "donut",
   height: number,
   stacked: boolean,
 ): ApexCharts.ApexOptions {
@@ -521,6 +578,96 @@ function topOptions(
     tooltip: {
       theme: mode,
       y: { formatter: (val: number) => `${val} ${label.toLowerCase()}` },
+    },
+  };
+}
+
+// ── additional charts ──
+
+/** Donut slice colors for guild ranks (distinct from the rune palette). */
+const RANK_PALETTE = ["#c9a86a", "#b05f6d", "#6d78a8", "#58a06e", "#a06e8f", "#8a94a0"];
+
+/** Unique raiders per day — single line, shares the trend's per-day data. */
+function raidersOptions(
+  days: RewardDay[],
+  colors: ChartColors,
+  mode: ChartMode,
+): ApexCharts.ApexOptions {
+  const counts = raidersPerDay(days);
+  return {
+    ...chartScaffold(mode, colors, "area", 320, false),
+    series: [{ name: "Active raiders", data: counts }],
+    colors: [colors.text],
+    stroke: { curve: "smooth", width: 2 },
+    fill: { type: "solid", opacity: 0.3 },
+    xaxis: {
+      categories: days.map((d) => fmtDayShort(d.day)),
+      labels: { style: { colors: colors.text } },
+    },
+    yaxis: {
+      labels: { style: { colors: colors.text } },
+      title: { text: "raiders", style: { color: colors.muted } },
+    },
+    legend: { show: false }, // single series
+    tooltip: {
+      theme: mode,
+      y: { formatter: (val: number) => `${val} raiders` },
+    },
+  };
+}
+
+/** Donut of the selected metric broken down by guild rank. */
+function rankOptions(
+  data: RankTotals,
+  colors: ChartColors,
+  mode: ChartMode,
+): ApexCharts.ApexOptions {
+  const label = METRIC_LABEL[metric];
+  return {
+    ...chartScaffold(mode, colors, "donut", 320, false),
+    series: data.values,
+    labels: data.ranks,
+    colors: RANK_PALETTE,
+    legend: {
+      position: "bottom",
+      labels: { colors: colors.muted },
+      markers: { shape: "circle" },
+      formatter: (name: string, opts?: ApexCharts.ApexLegendFormatterOpts) =>
+        `${name} · ${data.values[opts?.seriesIndex ?? 0] ?? 0}`,
+    },
+    tooltip: {
+      theme: mode,
+      y: { formatter: (val: number) => `${val} ${label.toLowerCase()}` },
+    },
+  };
+}
+
+/** Stacked "counted vs over-cap" bars — always detected-based (metric-independent). */
+function overcapOptions(
+  totals: RaidTotal[],
+  colors: ChartColors,
+  mode: ChartMode,
+): ApexCharts.ApexOptions {
+  return {
+    ...chartScaffold(mode, colors, "bar", 320, true),
+    series: [
+      { name: "Counted", data: totals.map((t) => t.detected - t.overCap) },
+      { name: "Over cap", data: totals.map((t) => t.overCap) },
+    ],
+    colors: [colors.text, colors.warn],
+    plotOptions: { bar: { borderRadius: 2, columnWidth: "55%" } },
+    xaxis: {
+      categories: totals.map((t) => RUNE_META[t.raidType].short),
+      labels: { style: { colors: colors.text } },
+    },
+    yaxis: {
+      labels: { style: { colors: colors.text } },
+      title: { text: "completions", style: { color: colors.muted } },
+    },
+    legend: bottomLegend(colors),
+    tooltip: {
+      theme: mode,
+      y: { formatter: (val: number) => `${val} detected` },
     },
   };
 }

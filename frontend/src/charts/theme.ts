@@ -4,6 +4,8 @@ export interface ChartColors {
   text: string;
   muted: string;
   grid: string;
+  /** Warning accent for over-cap segments; theme-independent (no CSS var). */
+  warn: string;
   runes: Record<Rune, string>;
 }
 
@@ -24,6 +26,7 @@ export function chartColors(): ChartColors {
     text: css("--text", "#d4ddd0"),
     muted: css("--text-muted", "#93aa9b"),
     grid: css("--text-dim", "#9cb1a4"),
+    warn: "#e07b5b",
     runes: {
       notg: css("--rune-notg", "#7bc3d6"),
       nol: css("--rune-nol", "#b298d6"),

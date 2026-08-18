@@ -17,6 +17,7 @@ export function loadApex(): Promise<typeof ApexCharts> {
     apexPromise = (async () => {
       const mod = await import("apexcharts/line"); // line/area/scatter/bubble/rangeArea
       await import("apexcharts/bar"); // bar/column/rangeBar
+      await import("apexcharts/pie"); // pie/donut/polarArea/radialBar
       await import("apexcharts/features/legend");
       await import("apexcharts/features/toolbar"); // zoom/pan (download tool hidden; exports feature not loaded)
       return mod.default;

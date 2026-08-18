@@ -158,3 +158,43 @@ export function memberLeaderboard(
     .sort((a, b) => b.total - a.total || a.username.localeCompare(b.username))
     .slice(0, Math.max(0, topN));
 }
+
+// ── Chart D: unique raiders per day (participation trend) ──
+
+/** Distinct members with any detection on each day, in day order. */
+export function raidersPerDay(days: RewardDay[]): number[] {
+  return days.map((d) => new Set(d.entries.map((e) => e.member_uuid)).size);
+}
+
+// ── Chart E: completions by guild rank (donut) ──
+
+/** Wynncraft guild ranks, leader-first display order (tracker.py GUILD_RANKS). */
+const RANK_ORDER = ["owner", "chief", "strategist", "captain", "recruiter", "recruit"];
+
+export interface RankTotals {
+  /** Display labels, capitalized, known ranks leader-first. */
+  ranks: string[];
+  values: number[];
+}
+
+export function rankTotals(summary: RewardSummary[], metric: Metric): RankTotals {
+  const totals = new Map<string, number>();
+  for (const r of summary) {
+    const rank = r.rank.trim().toLowerCase();
+    if (rank === "") continue;
+    totals.set(rank, (totals.get(rank) ?? 0) + metricValue(r, metric));
+  }
+  const rankIndex = (rank: string): number => {
+    const i = RANK_ORDER.indexOf(rank);
+    return i === -1 ? RANK_ORDER.length : i;
+  };
+  const ranks = [...totals.keys()].sort(
+    (a, b) => rankIndex(a) - rankIndex(b) || a.localeCompare(b),
+  );
+  const label = (rank: string): string =>
+    rank.charAt(0).toUpperCase() + rank.slice(1);
+  return {
+    ranks: ranks.map(label),
+    values: ranks.map((rank) => totals.get(rank)!),
+  };
+}

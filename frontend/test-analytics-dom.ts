@@ -1,6 +1,6 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { renderAnalytics, teardownAnalytics } from "./src/charts/analytics.js";
-import type { Cycle, RewardSummary } from "./src/api.js";
+import type { Cycle, RewardDay, RewardSummary } from "./src/api.js";
 
 GlobalRegistrator.register();
 
@@ -52,6 +52,30 @@ renderAnalytics(app, statusBar, { cycle: null, statusHtml: "", summary: null, su
 assert(app.textContent?.includes("backend down") === true, "summary error surfaced");
 assert(app.querySelector(".error-state") !== null, "summary error → error state");
 
+// ── stub the per-day API (no backend in the test) ──
+
+let failPerDay = false;
+const perDayFixture: RewardDay[] = [
+  {
+    day: "2026-08-01",
+    entries: [
+      { member_uuid: "m1", username: "Alice", rank: "Recruit", is_eligible: true, raid_type: "notg", daily_cap: 2, detected: 2, payable: 2, paid: 0, pending: 2, over_cap: 0 },
+      { member_uuid: "m2", username: "Bob", rank: "Member", is_eligible: false, raid_type: "notg", daily_cap: null, detected: 1, payable: 0, paid: 0, pending: 0, over_cap: 0 },
+    ],
+  },
+  {
+    day: "2026-08-02",
+    entries: [
+      { member_uuid: "m1", username: "Alice", rank: "Recruit", is_eligible: true, raid_type: "notg", daily_cap: 2, detected: 1, payable: 1, paid: 0, pending: 1, over_cap: 0 },
+      { member_uuid: "m3", username: "Carol", rank: "Officer", is_eligible: true, raid_type: "nol", daily_cap: null, detected: 1, payable: 1, paid: 1, pending: 0, over_cap: 0 },
+    ],
+  },
+];
+globalThis.fetch = (async () => {
+  if (failPerDay) throw new Error("backend down");
+  return { ok: true, status: 200, json: async () => perDayFixture } as Response;
+}) as typeof fetch;
+
 // ── full mount (loads the real apexcharts bundle in happy-dom) ──
 
 renderAnalytics(app, statusBar, { cycle, statusHtml: "Cycle 1", summary, summaryError: null });
@@ -68,8 +92,11 @@ assert(app.querySelector("#top-title")?.textContent === "Top 20 members", "leade
 // wait for the lazy apexcharts import + chart render
 await sleep(2500);
 
-const svgs = app.querySelectorAll("#chart-totals svg, #chart-top svg, #chart-trend svg");
-assert(svgs.length >= 2, `charts mounted (svg found in ${svgs.length} of 3 hosts)`);
+const svgs = app.querySelectorAll(
+  "#chart-totals svg, #chart-trend svg, #chart-top svg, #chart-raiders svg, #chart-rank svg, #chart-overcap svg",
+);
+assert(svgs.length >= 6, `charts mounted (svg found ${svgs.length} across 6 hosts)`);
+assert(app.querySelector("#chart-raiders svg") !== null, "raiders chart mounts from per-day data");
 
 // ── controls update charts in place without re-rendering HTML ──
 
@@ -80,12 +107,14 @@ assert(metricBtn?.getAttribute("aria-pressed") === "true", "metric toggle update
 await sleep(300);
 assert(app.querySelector("#chart-totals svg") !== null, "totals chart survives metric toggle (no remount)");
 
-// all legends share the same circle marker style (trend chart isn't mounted
-// in this test because its per-day fetch has no backend → 2 charts × 5 raids)
+// all legends share the same circle marker style: totals 5 + trend 5 + top 5
+// + rank 3 + over-cap 2 = 20 (raiders is a single series → legend hidden)
 const circleMarkers = app.querySelectorAll(".apexcharts-legend-marker.apexcharts-marker-circle");
 const squareMarkers = app.querySelectorAll(".apexcharts-legend-marker.apexcharts-marker-square");
-assert(circleMarkers.length === 10, "mounted legends use circle markers (10 total)");
+assert(circleMarkers.length === 20, "all legends use circle markers (20 total)");
 assert(squareMarkers.length === 0, "no square legend markers remain");
+assert(app.querySelectorAll("#chart-rank .apexcharts-legend-series").length === 3, "rank donut lists the 3 fixture ranks");
+assert(app.querySelectorAll("#chart-overcap .apexcharts-legend-series").length === 2, "over-cap chart lists counted/over-cap");
 
 // each chart's legend toggles raids (the totals legend is the new one)
 const totalsHost = app.querySelector("#chart-totals")!;
@@ -114,13 +143,23 @@ assert(visibleBars() === barsBefore, "second legend click restores the raid");
 document.dispatchEvent(new CustomEvent("themechange"));
 await sleep(300);
 assert(app.querySelector("#chart-totals svg") !== null, "charts rebuilt after themechange");
+assert(app.querySelector("#chart-rank svg") !== null, "rank donut rebuilt after themechange");
 
-// trend chart fetch fails in this test (no backend) → error + retry flow
+// ── per-day error path: fixture fetch fails for a different cycle ──
+failPerDay = true;
+renderAnalytics(app, statusBar, {
+  cycle: { ...cycle, index: 2 },
+  statusHtml: "Cycle 2",
+  summary,
+  summaryError: null,
+});
+await sleep(1200);
 const trendHost = app.querySelector("#chart-trend")!;
 const trendErrorShown = () => trendHost.querySelector(".error-detail") !== null;
-assert(trendErrorShown(), "trend fetch failure surfaces inline error");
+assert(trendErrorShown(), "per-day failure surfaces inline error");
 const trendRetry = trendHost.querySelector<HTMLButtonElement>("#trend-retry");
 assert(trendRetry !== null, "trend error state offers a retry button");
+assert(app.querySelector("#chart-raiders .chart-note") !== null, "raiders card shows unavailable note when per-day fails");
 trendRetry!.click();
 assert(trendHost.querySelector(".chart-loading") !== null, "retry puts the trend host back to loading");
 await sleep(1200);

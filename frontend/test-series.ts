@@ -2,6 +2,8 @@ import {
   cycleTotals,
   memberLeaderboard,
   perDayTotals,
+  raidersPerDay,
+  rankTotals,
 } from "./src/charts/series.js";
 import type { RewardSummary, RewardDay } from "./src/api.js";
 
@@ -93,6 +95,21 @@ assert(eq(detectedBoard[0]?.username, "Alice") && eq(detectedBoard[0]?.total, 7)
 const eligibleBoard = memberLeaderboard(summary, "eligible", 10);
 assert(eq(eligibleBoard[0]?.username, "Alice") && eq(eligibleBoard[0]?.total, 6), "leaderboard: eligible metric = paid + pending (Alice 4+2)");
 assert(eq(memberLeaderboard([], "pending", 5).length, 0), "leaderboard: empty summary");
+
+// ── raidersPerDay ───────────────────────────────────────────────
+
+assert(eq(raidersPerDay(days), [2, 1]), "raidersPerDay: distinct members per day (m1+m2, m1)");
+assert(eq(raidersPerDay([]), []), "raidersPerDay: empty days → no points");
+
+// ── rankTotals ──────────────────────────────────────────────────
+
+const ranks = rankTotals(summary, "detected");
+assert(eq(ranks.ranks, ["Recruit", "Member", "Officer"]), "rankTotals: known ranks first, unknown alphabetical");
+assert(eq(ranks.values, [7, 1, 16]), "rankTotals: detected sums per rank (Alice 7, Bob 1, Carol 16)");
+assert(eq(rankTotals(summary, "pending").values[2], 0), "rankTotals: selected metric applied (Carol pending 0)");
+assert(eq(rankTotals(summary, "eligible").ranks[0], "Recruit"), "rankTotals: eligible = paid + pending (Alice first)");
+assert(eq(rankTotals([], "detected").values.length, 0), "rankTotals: empty summary → no ranks");
+assert(eq(rankTotals([{ ...summary[0]!, rank: "" }], "detected").values.length, 0), "rankTotals: empty rank rows skipped");
 
 console.log(results.join("\n"));
 console.log(`\n${results.length} assertions passed`);

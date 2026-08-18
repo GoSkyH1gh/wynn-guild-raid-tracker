@@ -1649,6 +1649,21 @@ tr.voiding td {
   grid-column: 1 / -1;
 }
 
+/* Row of three compact charts (raiders / rank / over-cap). */
+.chart-grid-three {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  min-width: 0;
+}
+
+.chart-note {
+  margin: -0.25rem 0 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
 /* ApexCharts ships no spacing between the legend marker and its label
    (.apexcharts-legend-text's padding/margin cancel out), so add it here. */
 .chart-card .apexcharts-legend-marker {
@@ -1677,7 +1692,8 @@ tr.voiding td {
 }
 
 @media (max-width: 900px) {
-  .chart-grid {
+  .chart-grid,
+  .chart-grid-three {
     grid-template-columns: 1fr;
   }
 }
