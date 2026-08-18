@@ -155,7 +155,7 @@ function controlsHtml(summary: RewardSummary[]): string {
 
   const raidChips = RUNE_TYPES.map((rt) => {
     const on = enabledRaids.has(rt);
-    return `<button type="button" class="chip-btn${on ? " on" : ""}" data-raid="${rt}" aria-pressed="${on}" title="${escapeHtml(RUNE_META[rt].name)}"><span class="chip-dot" style="background: var(--rune-${rt})"></span>${RUNE_META[rt].glyph}</button>`;
+    return `<button type="button" class="chip-btn${on ? " on" : ""}" data-raid="${rt}" aria-pressed="${on}" title="${escapeHtml(RUNE_META[rt].name)}"><span class="chip-dot" style="background: var(--rune-${rt})"></span>${RUNE_META[rt].short}</button>`;
   }).join("");
 
   const topOptions = [5, 10, 20]
@@ -461,7 +461,7 @@ function totalsOptions(
     colors: RUNE_TYPES.map((rt) => colors.runes[rt]),
     plotOptions: { bar: { distributed: true, borderRadius: 3, columnWidth: "55%" } },
     xaxis: {
-      categories: data.map((d) => `${RUNE_META[d.raidType].glyph} · ${d.raidType}`),
+      categories: data.map((d) => RUNE_META[d.raidType].short),
       labels: { style: { colors: colors.text } },
     },
     yaxis: {

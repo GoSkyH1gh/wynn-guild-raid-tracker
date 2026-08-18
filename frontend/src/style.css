@@ -1618,6 +1618,10 @@ tr.voiding td {
   border-radius: 3px;
 }
 
+#ctl-member {
+  width: 12rem; /* wider than the 5rem .settings-input default so names aren't cut off */
+}
+
 .chip-btn {
   display: inline-flex;
   align-items: center;

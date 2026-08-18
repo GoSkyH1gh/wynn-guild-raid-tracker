@@ -1,16 +1,16 @@
 import type { RewardSummary, RewardDay } from "../api.js";
 
-// ── Raid types / labels (keep glyphs + names in sync with api.ts) ──
+// ── Raid types / labels (keep short codes + names in sync with api.ts) ──
 
 export type Rune = "notg" | "nol" | "tcc" | "tna" | "wtp";
 export const RUNE_TYPES: Rune[] = ["notg", "nol", "tcc", "tna", "wtp"];
 
-export const RUNE_META: Record<Rune, { glyph: string; name: string }> = {
-  notg: { glyph: "Az", name: "Nest of the Grootslangs" },
-  nol: { glyph: "Uth", name: "Orphion's Nexus of Light" },
-  tcc: { glyph: "Tol", name: "The Canyon Colossus" },
-  tna: { glyph: "Tol", name: "The Nameless Anomaly" },
-  wtp: { glyph: "Ek", name: "The Wartorn Palace" },
+export const RUNE_META: Record<Rune, { short: string; name: string }> = {
+  notg: { short: "NOTG", name: "Nest of the Grootslangs" },
+  nol: { short: "NOL", name: "Orphion's Nexus of Light" },
+  tcc: { short: "TCC", name: "The Canyon Colossus" },
+  tna: { short: "TNA", name: "The Nameless Anomaly" },
+  wtp: { short: "WTP", name: "The Wartorn Palace" },
 };
 
 // ── Metric ──
