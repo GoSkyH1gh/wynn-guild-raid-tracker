@@ -70,7 +70,8 @@ if (savedTheme === "light" || savedTheme === "dark") {
 }
 
 let currentView: View = (params.get("view") as View) ?? "rewards";
-const cycleParam = Number(params.get("cycle"));
+const cycleParamRaw = params.get("cycle");
+const cycleParam = cycleParamRaw !== null ? Number(cycleParamRaw) : NaN;
 let selectedCycleIndex: number | null =
   Number.isInteger(cycleParam) && cycleParam >= 0 ? cycleParam : null;
 let cycles: Cycle[] | null = null;
@@ -90,6 +91,138 @@ function escapeHtml(s: string): string {
         return "&#39;";
     }
   });
+}
+
+function escapeDiscord(s: string): string {
+  return s.replace(/([*_`~|\\])/g, "\\$1").replace(/@/g, "@\u200b");
+}
+
+function buildAnnouncementText(summary: RewardSummary[], cycle: Cycle, twoLine = announceTwoLine): string {
+  const byMember = new Map<string, { username: string; counts: Map<string, number>; total: number }>();
+  for (const row of summary) {
+    if (!row.is_eligible) continue;
+    let entry = byMember.get(row.member_uuid);
+    if (!entry) {
+      entry = { username: row.username, counts: new Map(), total: 0 };
+      byMember.set(row.member_uuid, entry);
+    }
+    const prev = entry.counts.get(row.raid_type) ?? 0;
+    entry.counts.set(row.raid_type, prev + row.payable);
+    // recalc total from map to avoid double counting if row duplicates; but summary is already per-raid aggregated
+    // so incremental total is fine if we recompute at the end
+  }
+  // normalize totals from map
+  for (const entry of byMember.values()) {
+    let t = 0;
+    for (const v of entry.counts.values()) t += v;
+    entry.total = t;
+  }
+
+  const eligible = [...byMember.entries()]
+    .map(([uuid, e]) => ({ uuid, username: e.username, counts: e.counts, total: e.total }))
+    .filter((e) => e.total > 0)
+    .sort((a, b) => b.total - a.total || a.username.localeCompare(b.username));
+
+  const totalRunes = eligible.reduce((s, e) => s + e.total, 0);
+  const header = `**New Raid Cycle! ${fmtDay(cycle.start_date)} to ${fmtDay(cycle.display_end)} - Guild Raid Payouts**`;
+  if (eligible.length === 0) {
+    return `${header}\n\nNo eligible players earned runes this cycle.\n\nHappy Raiding :D`;
+  }
+
+  const lines = eligible.map((e, i) => {
+    const safeName = escapeDiscord(e.username);
+    const tcc = e.counts.get("tcc") ?? 0;
+    const tna = e.counts.get("tna") ?? 0;
+    const tol = tcc + tna;
+    const notg = e.counts.get("notg") ?? 0;
+    const nol = e.counts.get("nol") ?? 0;
+    const wtp = e.counts.get("wtp") ?? 0;
+    const parts: string[] = [];
+    if (notg > 0) parts.push(`${notg} ${RAID_RUNES["notg"]!.rune}`);
+    if (nol > 0) parts.push(`${nol} ${RAID_RUNES["nol"]!.rune}`);
+    if (tol > 0) parts.push(`${tol} ${RAID_RUNES["tcc"]!.rune}`);
+    if (wtp > 0) parts.push(`${wtp} ${RAID_RUNES["wtp"]!.rune}`);
+    if (parts.length === 0) return `${i + 1}. **${safeName}** - **${e.total}** runes`;
+    if (twoLine) {
+      return `${i + 1}. **${safeName}** - **${e.total}** runes\n   ${parts.join(" • ")}`;
+    }
+    return `${i + 1}. **${safeName}** - **${e.total}** runes • ${parts.join(" • ")}`;
+  });
+
+  const footer = `Total: **${totalRunes}** runes across **${eligible.length}** player${eligible.length === 1 ? "" : "s"}`;
+  const deadlineTs = Math.floor(new Date(cycle.payout_deadline).getTime() / 1000);
+  const validUntil = Number.isFinite(deadlineTs)
+    ? `Contact a Duke+ to claim your runes! Valid until <t:${deadlineTs}:F>`
+    : `Contact a Duke+ to claim your runes!`;
+  const quotedLines = lines
+    .map((entry) =>
+      entry
+        .split("\n")
+        .map((l) => `> ${l}`)
+        .join("\n"),
+    )
+    .join("\n");
+  return `${header}\n\n${quotedLines}\n\n${footer}\n${validUntil}\n\nHappy Raiding :D`;
+}
+
+function announceModalHtml(): string {
+  if (!announceModalOpen) return "";
+  const cycle = selectedCycle();
+  if (!cycle || summaryData === null) return "";
+  const text = buildAnnouncementText(summaryData, cycle, announceTwoLine);
+  const charCount = text.length;
+  const overLimit = charCount > 1900;
+  const nearLimit = charCount > 2000;
+  return `
+    <div class="modal-overlay" id="announce-modal">
+      <div class="modal-card modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="announce-title" aria-describedby="announce-hint">
+        <h2 class="modal-title" id="announce-title">Discord announcement - Cycle ${cycle.index}</h2>
+        <p class="modal-hint" id="announce-hint">Preview for <strong>Cycle ${cycle.index} - ${escapeHtml(fmtDay(cycle.start_date))} to ${escapeHtml(fmtDay(cycle.display_end))}</strong>. Eligible players only, sorted by runes earned.</p>
+        <div class="announce-options">
+          <span class="announce-options-label" id="announce-layout-label">Layout</span>
+          <div class="ctl-segmented announce-layout-segmented" role="group" aria-labelledby="announce-layout-label">
+            <button type="button" class="view-btn ${announceTwoLine ? "active" : ""}" data-layout="two" aria-pressed="${announceTwoLine ? "true" : "false"}">Two-line</button>
+            <button type="button" class="view-btn ${!announceTwoLine ? "active" : ""}" data-layout="one" aria-pressed="${!announceTwoLine ? "true" : "false"}">Compact</button>
+          </div>
+          <span class="announce-layout-hint">${announceTwoLine ? "Name and total on first line, runes on second" : "One line per player"}</span>
+        </div>
+        <div class="announce-preview-wrap">
+          <pre id="announce-preview" class="announce-preview" tabindex="0" aria-label="Announcement preview">${escapeHtml(text)}</pre>
+        </div>
+        <div class="announce-meta">
+          <span class="announce-charcount${overLimit ? " over" : ""}${nearLimit ? " danger" : ""}">${charCount} / 2000</span>
+          ${overLimit ? `<span class="announce-warn">${nearLimit ? "Exceeds Discord limit - message will be truncated." : "Approaching Discord limit."}</span>` : ""}
+        </div>
+        <div class="modal-actions">
+          <button class="btn-logout" id="announce-close">Close</button>
+          <button class="btn-pay ${announceCopied ? "btn-pay--copied" : ""}" id="announce-copy" aria-live="polite">
+            ${announceCopied ? `<span class="copy-check" aria-hidden="true">✓</span> Copied!` : "Copy to clipboard"}
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function copyAnnouncementText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const pre = document.getElementById("announce-preview");
+    if (!pre) return false;
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(pre);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    try {
+      const ok = document.execCommand("copy");
+      if (ok) return true;
+    } catch {
+      // fall through
+    }
+    return false;
+  }
 }
 
 let summaryData: RewardSummary[] | null = null;
@@ -117,6 +250,11 @@ let addingUser = false;
 let confirmingRemoveId: string | null = null;
 let removingUserId: string | null = null;
 let currentUser: CurrentUser | null = null;
+let announceModalOpen = false;
+let announceCopied = false;
+let announceCopyResetTimer: ReturnType<typeof setTimeout> | null = null;
+let announceTriggerEl: HTMLElement | null = null;
+let announceTwoLine = true;
 
 function now(): Date {
   return new Date();
@@ -126,7 +264,8 @@ function selectedCycle(): Cycle | null {
   if (!cycles || cycles.length === 0) return null;
   const found = cycles.find((c) => c.index === selectedCycleIndex);
   if (found) return found;
-  const fallback = cycles.find((c) => c.is_current) ?? cycles[cycles.length - 1]!;
+  const payoutable = [...cycles].reverse().find((c) => !c.is_current && !c.is_over);
+  const fallback = payoutable ?? cycles.find((c) => c.is_current) ?? cycles[cycles.length - 1]!;
   selectedCycleIndex = fallback.index;
   return fallback;
 }
@@ -385,6 +524,12 @@ function render() {
       confirmingVoidId = null;
       confirmingRemoveId = null;
       payModalMember = null;
+      announceModalOpen = false;
+      announceCopied = false;
+      if (announceCopyResetTimer) {
+        clearTimeout(announceCopyResetTimer);
+        announceCopyResetTimer = null;
+      }
       const url = new URL(location.href);
       url.searchParams.set("view", currentView);
       history.replaceState(null, "", url.href);
@@ -398,6 +543,14 @@ function render() {
     destroyPicker = mountCyclePicker($pickerRoot, cycleOptions(), (index) => {
       selectedCycleIndex = index;
       expandedMember = null;
+      if (announceModalOpen) {
+        announceModalOpen = false;
+        announceCopied = false;
+        if (announceCopyResetTimer) {
+          clearTimeout(announceCopyResetTimer);
+          announceCopyResetTimer = null;
+        }
+      }
       const url = new URL(location.href);
       url.searchParams.set("cycle", String(index));
       history.replaceState(null, "", url.href);
@@ -533,7 +686,20 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
     return;
   }
 
-  let html = `<div class="table-wrap"><table class="raid-table rewards-table">
+  const eligiblePayableCount = eligibleMembers.reduce(
+    (s, [, rows]) => s + rows.reduce((a, r) => a + r.payable, 0),
+    0,
+  );
+  const eligiblePlayerCount = eligibleMembers.filter(([, rows]) =>
+    rows.some((r) => r.payable > 0),
+  ).length;
+  const announceDisabled = eligiblePayableCount === 0;
+
+  const toolbarHtml = `<div class="rewards-toolbar rewards-toolbar--minimal">
+    <button class="btn-pay btn-announce" id="announce-btn" ${announceDisabled ? "disabled" : ""} aria-haspopup="dialog" title="${announceDisabled ? "No eligible payouts to announce" : `Copy announcement for Cycle ${cycle?.index ?? ""} - ${eligiblePayableCount} runes, ${eligiblePlayerCount} players`}" aria-label="${announceDisabled ? "No eligible payouts to announce" : `Copy announcement for Cycle ${cycle?.index ?? ""} - ${eligiblePayableCount} runes across ${eligiblePlayerCount} players`}">${announceDisabled ? "⎘ Copy announcement" : `⎘ Copy announcement • ${eligiblePayableCount} runes`}</button>
+  </div>`;
+
+  let html = `${toolbarHtml}<div class="table-wrap"><table class="raid-table rewards-table">
     <colgroup>
       <col class="col-name">
       <col class="col-rank">
@@ -590,6 +756,7 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
   </table></div>`;
   $el.innerHTML = html;
   $el.insertAdjacentHTML("beforeend", payoutModalHtml());
+  $el.insertAdjacentHTML("beforeend", announceModalHtml());
 
   document.querySelectorAll(".member-row").forEach((row) => {
     const toggle = () => {
@@ -622,6 +789,16 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
       e.stopPropagation();
       payTriggerUuid = (e.currentTarget as HTMLElement).dataset.payOpen!;
       payModalMember = payTriggerUuid;
+      // close announcement if open
+      if (announceModalOpen) {
+        announceModalOpen = false;
+        announceCopied = false;
+        if (announceCopyResetTimer) {
+          clearTimeout(announceCopyResetTimer);
+          announceCopyResetTimer = null;
+        }
+        announceTriggerEl = null;
+      }
       renderRewards($el, $status);
     })
   );
@@ -725,6 +902,146 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
       await performPayout(uuid, items);
       document.querySelector<HTMLElement>(`[data-pay-open="${uuid}"]`)?.focus();
       payTriggerUuid = null;
+    });
+  }
+
+  // ── Announcement modal ─────────────────────────────────────
+  document.getElementById("announce-btn")?.addEventListener("click", (e) => {
+    announceTriggerEl = e.currentTarget as HTMLElement;
+    announceModalOpen = true;
+    announceCopied = false;
+    if (announceCopyResetTimer) {
+      clearTimeout(announceCopyResetTimer);
+      announceCopyResetTimer = null;
+    }
+    // close pay modal if open
+    if (payModalMember) {
+      payModalMember = null;
+      payTriggerUuid = null;
+    }
+    renderRewards($el, $status);
+  });
+
+  if (announceModalOpen) {
+    const $overlay = document.getElementById("announce-modal");
+    const $copyBtnInitial = $overlay?.querySelector<HTMLButtonElement>("#announce-copy");
+    const activeInside = $overlay ? $overlay.contains(document.activeElement) : false;
+    if ($copyBtnInitial && !activeInside) $copyBtnInitial.focus();
+
+    const closeAnnounce = () => {
+      const trigger = announceTriggerEl;
+      announceModalOpen = false;
+      announceCopied = false;
+      if (announceCopyResetTimer) {
+        clearTimeout(announceCopyResetTimer);
+        announceCopyResetTimer = null;
+      }
+      document.removeEventListener("keydown", onAnnounceKeydown);
+      renderRewards($el, $status);
+      trigger?.focus();
+      announceTriggerEl = null;
+    };
+
+    const onAnnounceKeydown = (e: KeyboardEvent) => {
+      if (!announceModalOpen || currentView !== "rewards") return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeAnnounce();
+        return;
+      }
+      if (e.key === "Tab" && $overlay) {
+        const focusables = [
+          ...$overlay.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+          ),
+        ].filter((el) => el.offsetParent !== null);
+        if (focusables.length === 0) return;
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
+        const active = document.activeElement;
+        const inside = (el: Element | null): boolean => el !== null && $overlay.contains(el);
+        if (e.shiftKey && (active === first || !inside(active))) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && (active === last || !inside(active))) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", onAnnounceKeydown);
+
+    $overlay?.addEventListener("pointerdown", (e) => {
+      if (e.target === $overlay) closeAnnounce();
+    });
+    document.getElementById("announce-close")?.addEventListener("click", closeAnnounce);
+
+    document.querySelectorAll<HTMLButtonElement>("[data-layout]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const layout = btn.dataset.layout;
+        const nextTwoLine = layout === "two";
+        if (nextTwoLine === announceTwoLine) return;
+        announceTwoLine = nextTwoLine;
+        renderRewards($el, $status);
+        requestAnimationFrame(() => {
+          const sel = announceTwoLine ? '[data-layout="two"]' : '[data-layout="one"]';
+          const $next = document.getElementById("announce-modal")?.querySelector<HTMLButtonElement>(sel);
+          $next?.focus();
+        });
+      });
+    });
+
+    document.getElementById("announce-copy")?.addEventListener("click", async () => {
+      const c = selectedCycle();
+      if (!c || !summaryData) return;
+      const text = buildAnnouncementText(summaryData, c, announceTwoLine);
+      const $btn = document.getElementById("announce-copy") as HTMLButtonElement | null;
+      if ($btn) $btn.disabled = true;
+      const ok = await copyAnnouncementText(text);
+      if ($btn) $btn.disabled = false;
+      if (ok) {
+        announceCopied = true;
+        // re-render to show ✓ state, but patch DOM directly to avoid full re-render focus loss
+        if ($btn) {
+          $btn.classList.add("btn-pay--copied");
+          $btn.innerHTML = `<span class="copy-check" aria-hidden="true">✓</span> Copied!`;
+        }
+        showToast("Copied - paste in Discord");
+        if (announceCopyResetTimer) clearTimeout(announceCopyResetTimer);
+        announceCopyResetTimer = setTimeout(() => {
+          announceCopied = false;
+          const $b = document.getElementById("announce-copy") as HTMLButtonElement | null;
+          if ($b) {
+            $b.classList.remove("btn-pay--copied");
+            $b.textContent = "Copy to clipboard";
+          }
+          announceCopyResetTimer = null;
+        }, 2200);
+      } else {
+        // fallback already selected text; hint manual copy
+        showToast("Selected - press Ctrl+C to copy");
+        const pre = document.getElementById("announce-preview");
+        if (pre) {
+          const sel = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(pre);
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }
+      }
+    });
+
+    // click on preview selects all for easy manual copy
+    document.getElementById("announce-preview")?.addEventListener("click", () => {
+      const pre = document.getElementById("announce-preview");
+      if (!pre) return;
+      const sel = window.getSelection();
+      if (sel && sel.toString().length === 0) {
+        const range = document.createRange();
+        range.selectNodeContents(pre);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
     });
   }
 }
@@ -1575,7 +1892,7 @@ async function fetchData() {
   const signature = dataSignature();
   if (signature !== lastRenderSignature) {
     lastRenderSignature = signature;
-    if (payModalMember === null) {
+    if (payModalMember === null && !announceModalOpen) {
       render();
     }
   }

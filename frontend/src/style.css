@@ -143,7 +143,7 @@ body {
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 0.5rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.55rem;
   justify-content: space-between;
 }
 
@@ -1361,6 +1361,173 @@ tr.voiding td {
   margin-top: 1rem;
 }
 
+.modal-card--wide {
+  max-width: 36rem;
+}
+
+/* ── Rewards toolbar ───────────────────────────── */
+
+.rewards-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.rewards-toolbar-hint {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rewards-toolbar--minimal {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-bottom: 0.9rem;
+  justify-content: flex-end;
+}
+
+.btn-announce {
+  min-width: 15rem;
+  border-style: dashed;
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--radius);
+}
+
+.btn-announce:disabled {
+  opacity: 0.45;
+}
+
+/* ── Announcement modal ────────────────────────── */
+
+.announce-preview-wrap {
+  margin-top: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.announce-preview {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  max-height: min(28rem, 52vh);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 0.78rem ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+  line-height: 1.55;
+  color: var(--text);
+  background: transparent;
+  cursor: text;
+}
+
+.announce-preview:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: -2px;
+}
+
+.announce-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.4rem;
+  min-height: 1rem;
+}
+
+.announce-charcount {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.announce-charcount.over {
+  color: var(--rune-tna);
+  font-weight: 600;
+}
+
+.announce-charcount.danger {
+  color: var(--rune-tcc);
+}
+
+.announce-warn {
+  font-size: 0.68rem;
+  color: var(--rune-tcc);
+}
+
+.announce-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0.85rem 0 0.75rem;
+  padding: 0.55rem 0.65rem;
+  background: color-mix(in srgb, var(--bg) 72%, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.announce-options-label {
+  font-family: var(--font-display);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.announce-layout-segmented {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.announce-layout-segmented .view-btn {
+  min-width: 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.72rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.announce-layout-hint {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+@media (max-width: 700px) {
+  .announce-layout-hint {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}
+
+.btn-pay--copied {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent-light);
+  animation: copy-pop 0.28s ease;
+}
+
+.copy-check {
+  font-weight: 700;
+  margin-right: 0.2rem;
+}
+
+@keyframes copy-pop {
+  0% { transform: scale(0.96); }
+  60% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
 /* ── Toast ────────────────────────────────────── */
 
 .toast {
@@ -1579,6 +1746,34 @@ tr.voiding td {
 
   .raid-table {
     font-size: 0.8rem;
+  }
+
+  .rewards-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .rewards-toolbar-hint {
+    flex-basis: 100%;
+  }
+
+  .btn-announce {
+    width: 100%;
+  }
+
+  .rewards-toolbar--minimal {
+    justify-content: center;
+  }
+
+  .rewards-toolbar--minimal .btn-announce {
+    max-width: 24rem;
+  }
+
+  .modal-card--wide {
+    max-width: 100%;
+  }
+
+  .announce-preview {
+    max-height: min(22rem, 48vh);
   }
 }
 
