@@ -150,7 +150,11 @@ function buildAnnouncementText(summary: RewardSummary[], cycle: Cycle, twoLine =
   });
 
   const footer = `Total: **${totalRunes}** runes across **${eligible.length}** player${eligible.length === 1 ? "" : "s"}`;
-  return `${header}\n\n${lines.join("\n")}\n\n${footer}`;
+  const deadlineTs = Math.floor(new Date(cycle.payout_deadline).getTime() / 1000);
+  const validUntil = Number.isFinite(deadlineTs)
+    ? `Contact a Duke+ to claim your runes! Valid until <t:${deadlineTs}:F>`
+    : `Contact a Duke+ to claim your runes!`;
+  return `${header}\n\n${lines.join("\n")}\n\n${footer}\n${validUntil}`;
 }
 
 function announceModalHtml(): string {
