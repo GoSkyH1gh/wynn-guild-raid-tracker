@@ -1385,6 +1385,14 @@ tr.voiding td {
   font-variant-numeric: tabular-nums;
 }
 
+.rewards-toolbar--minimal {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-bottom: 0.6rem;
+  justify-content: flex-end;
+}
+
 .btn-announce {
   min-width: 8.5rem;
   border-style: dashed;

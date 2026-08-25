@@ -683,9 +683,8 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
   ).length;
   const announceDisabled = eligiblePayableCount === 0;
 
-  const toolbarHtml = `<div class="rewards-toolbar">
-    <span class="rewards-toolbar-hint">Eligible only · ${eligiblePlayerCount} player${eligiblePlayerCount === 1 ? "" : "s"} · ${eligiblePayableCount} runes earned</span>
-    <button class="btn-pay btn-announce" id="announce-btn" ${announceDisabled ? "disabled" : ""} aria-haspopup="dialog" title="${announceDisabled ? "No eligible payouts to announce" : `Copy announcement for Cycle ${cycle?.index ?? ""}`}">⎘ Copy announcement</button>
+  const toolbarHtml = `<div class="rewards-toolbar rewards-toolbar--minimal">
+    <button class="btn-pay btn-announce" id="announce-btn" ${announceDisabled ? "disabled" : ""} aria-haspopup="dialog" title="${announceDisabled ? "No eligible payouts to announce" : `Copy announcement for Cycle ${cycle?.index ?? ""} - ${eligiblePayableCount} runes, ${eligiblePlayerCount} players`}" aria-label="${announceDisabled ? "No eligible payouts to announce" : `Copy announcement for Cycle ${cycle?.index ?? ""} - ${eligiblePayableCount} runes across ${eligiblePlayerCount} players`}">${announceDisabled ? "⎘ Copy announcement" : `⎘ Copy announcement • ${eligiblePayableCount} runes`}</button>
   </div>`;
 
   let html = `${toolbarHtml}<div class="table-wrap"><table class="raid-table rewards-table">
