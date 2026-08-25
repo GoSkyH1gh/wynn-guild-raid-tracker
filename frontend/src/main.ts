@@ -70,7 +70,8 @@ if (savedTheme === "light" || savedTheme === "dark") {
 }
 
 let currentView: View = (params.get("view") as View) ?? "rewards";
-const cycleParam = Number(params.get("cycle"));
+const cycleParamRaw = params.get("cycle");
+const cycleParam = cycleParamRaw !== null ? Number(cycleParamRaw) : NaN;
 let selectedCycleIndex: number | null =
   Number.isInteger(cycleParam) && cycleParam >= 0 ? cycleParam : null;
 let cycles: Cycle[] | null = null;
