@@ -251,7 +251,8 @@ function selectedCycle(): Cycle | null {
   if (!cycles || cycles.length === 0) return null;
   const found = cycles.find((c) => c.index === selectedCycleIndex);
   if (found) return found;
-  const fallback = cycles.find((c) => c.is_current) ?? cycles[cycles.length - 1]!;
+  const payoutable = [...cycles].reverse().find((c) => !c.is_current && !c.is_over);
+  const fallback = payoutable ?? cycles.find((c) => c.is_current) ?? cycles[cycles.length - 1]!;
   selectedCycleIndex = fallback.index;
   return fallback;
 }
