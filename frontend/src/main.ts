@@ -126,12 +126,7 @@ function buildAnnouncementText(summary: RewardSummary[], cycle: Cycle, twoLine =
   const totalRunes = eligible.reduce((s, e) => s + e.total, 0);
   const header = `**New Raid Cycle! ${fmtDay(cycle.start_date)} to ${fmtDay(cycle.display_end)} - Guild Raid Payouts**`;
   if (eligible.length === 0) {
-    const emptyMain = `${header}\n\nNo eligible players earned runes this cycle.`;
-    const quotedEmpty = emptyMain
-      .split("\n")
-      .map((l) => (l ? `> ${l}` : ">"))
-      .join("\n");
-    return `${quotedEmpty}\n\nHappy Raiding :D`;
+    return `${header}\n\nNo eligible players earned runes this cycle.\n\nHappy Raiding :D`;
   }
 
   const lines = eligible.map((e, i) => {
@@ -159,12 +154,15 @@ function buildAnnouncementText(summary: RewardSummary[], cycle: Cycle, twoLine =
   const validUntil = Number.isFinite(deadlineTs)
     ? `Contact a Duke+ to claim your runes! Valid until <t:${deadlineTs}:F>`
     : `Contact a Duke+ to claim your runes!`;
-  const main = `${header}\n\n${lines.join("\n")}\n\n${footer}\n${validUntil}`;
-  const quoted = main
-    .split("\n")
-    .map((l) => (l ? `> ${l}` : ">"))
+  const quotedLines = lines
+    .map((entry) =>
+      entry
+        .split("\n")
+        .map((l) => `> ${l}`)
+        .join("\n"),
+    )
     .join("\n");
-  return `${quoted}\n\nHappy Raiding :D`;
+  return `${header}\n\n${quotedLines}\n\n${footer}\n${validUntil}\n\nHappy Raiding :D`;
 }
 
 function announceModalHtml(): string {
