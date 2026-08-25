@@ -167,12 +167,11 @@ function announceModalHtml(): string {
         <p class="modal-hint" id="announce-hint">Preview for <strong>Cycle ${cycle.index} - ${escapeHtml(fmtDay(cycle.start_date))} to ${escapeHtml(fmtDay(cycle.display_end))}</strong>. Eligible players only, sorted by runes earned.</p>
         <div class="announce-options">
           <span class="announce-options-label" id="announce-layout-label">Layout</span>
-          <label class="announce-switch" for="announce-layout-switch">
-            <input type="checkbox" id="announce-layout-switch" role="switch" aria-labelledby="announce-layout-label announce-layout-status" aria-checked="${announceTwoLine ? "true" : "false"}" ${announceTwoLine ? "checked" : ""}>
-            <span class="announce-switch-track" aria-hidden="true"><span class="announce-switch-thumb"></span></span>
-            <span class="announce-switch-status" id="announce-layout-status">${announceTwoLine ? "Two-line" : "Compact"}</span>
-          </label>
-          <span class="announce-switch-hint">${announceTwoLine ? "Name and total on first line, runes on second" : "One line per player"}</span>
+          <div class="ctl-segmented announce-layout-segmented" role="group" aria-labelledby="announce-layout-label">
+            <button type="button" class="view-btn ${announceTwoLine ? "active" : ""}" data-layout="two" aria-pressed="${announceTwoLine ? "true" : "false"}">Two-line</button>
+            <button type="button" class="view-btn ${!announceTwoLine ? "active" : ""}" data-layout="one" aria-pressed="${!announceTwoLine ? "true" : "false"}">Compact</button>
+          </div>
+          <span class="announce-layout-hint">${announceTwoLine ? "Name and total on first line, runes on second" : "One line per player"}</span>
         </div>
         <div class="announce-preview-wrap">
           <pre id="announce-preview" class="announce-preview" tabindex="0" aria-label="Announcement preview">${escapeHtml(text)}</pre>
@@ -964,14 +963,18 @@ function renderRewards($el: HTMLElement, $status: HTMLElement) {
     });
     document.getElementById("announce-close")?.addEventListener("click", closeAnnounce);
 
-    document.getElementById("announce-layout-switch")?.addEventListener("change", (e) => {
-      const $cb = e.currentTarget as HTMLInputElement;
-      announceTwoLine = $cb.checked;
-      renderRewards($el, $status);
-      // keep focus on the switch after re-render
-      requestAnimationFrame(() => {
-        const $next = document.getElementById("announce-layout-switch") as HTMLInputElement | null;
-        $next?.focus();
+    document.querySelectorAll<HTMLButtonElement>("[data-layout]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const layout = btn.dataset.layout;
+        const nextTwoLine = layout === "two";
+        if (nextTwoLine === announceTwoLine) return;
+        announceTwoLine = nextTwoLine;
+        renderRewards($el, $status);
+        requestAnimationFrame(() => {
+          const sel = announceTwoLine ? '[data-layout="two"]' : '[data-layout="one"]';
+          const $next = document.getElementById("announce-modal")?.querySelector<HTMLButtonElement>(sel);
+          $next?.focus();
+        });
       });
     });
 
