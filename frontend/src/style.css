@@ -143,7 +143,7 @@ body {
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 0.5rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.55rem;
   justify-content: space-between;
 }
 
@@ -1389,13 +1389,15 @@ tr.voiding td {
   background: transparent;
   border: none;
   padding: 0;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.9rem;
   justify-content: flex-end;
 }
 
 .btn-announce {
-  min-width: 8.5rem;
+  min-width: 15rem;
   border-style: dashed;
+  padding: 0.4rem 0.7rem;
+  border-radius: var(--radius);
 }
 
 .btn-announce:disabled {
@@ -1756,6 +1758,14 @@ tr.voiding td {
 
   .btn-announce {
     width: 100%;
+  }
+
+  .rewards-toolbar--minimal {
+    justify-content: center;
+  }
+
+  .rewards-toolbar--minimal .btn-announce {
+    max-width: 24rem;
   }
 
   .modal-card--wide {
