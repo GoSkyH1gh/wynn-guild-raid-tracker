@@ -16,3 +16,8 @@
   from = "/legal"
   to = "/legal.html"
   status = 200
+
+[[redirects]]
+  from = "/legal-changes"
+  to = "/legal-changes.html"
+  status = 200

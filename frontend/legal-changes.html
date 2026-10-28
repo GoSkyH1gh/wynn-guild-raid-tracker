@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0e1518" />
+    <meta
+      name="description"
+      content="Changes and updates to Guild Raid Tracker, including its Privacy Policy and Terms of Service."
+    />
+    <title>Changes · Guild Raid Tracker</title>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("theme");
+          if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+        } catch (e) {}
+      })();
+    </script>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⬡</text></svg>"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/legal.css" />
+  </head>
+  <body class="legal-page">
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <div class="legal-shell">
+      <header class="legal-bar">
+        <a class="legal-back" href="/" aria-label="Back to Guild Raid Tracker">
+          <span aria-hidden="true">←</span> Back
+        </a>
+        <button type="button" class="theme-toggle" aria-label="Switch to light mode">Light</button>
+      </header>
+
+      <main class="legal-main" id="content">
+        <h1 class="legal-page-title">Changes</h1>
+        <nav class="legal-nav" aria-label="Legal sections">
+          <a href="/legal#privacy">Privacy Policy</a>
+          <a href="/legal#terms">Terms of Service</a>
+          <a href="/legal-changes" aria-current="page">Changes</a>
+        </nav>
+
+        <article class="legal-doc" aria-labelledby="updates-title">
+          <h2 class="legal-doc-title" id="updates-title">Updates</h2>
+          <p class="legal-updated">
+            Last updated: <time datetime="2026-10-28">28 October 2026</time>
+          </p>
+
+          <p>
+            This page lists the changes made to Guild Raid Tracker, including updates to the
+            <a href="/legal#privacy">Privacy Policy</a> and
+            <a href="/legal#terms">Terms of Service</a>. The newest change is listed first.
+          </p>
+
+          <h3 id="change-2026-10-28">
+            Privacy Policy and Terms of Service rewritten
+            <span class="legal-subheading-note">· 28 October 2026</span>
+          </h3>
+          <ul>
+            <li>
+              Rewrote the Privacy Policy to explain more clearly what the Service processes, why,
+              how long it is kept and which safeguards apply to transfers outside the EEA.
+            </li>
+            <li>
+              Rewrote the Terms of Service, including how payouts work, how Wynncraft data is used
+              and which law governs the Service.
+            </li>
+            <li>Added this Changes page.</li>
+          </ul>
+        </article>
+      </main>
+    </div>
+
+    <script type="module" src="/src/legal.ts"></script>
+  </body>
+</html>
