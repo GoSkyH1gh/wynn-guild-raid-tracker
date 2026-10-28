@@ -105,11 +105,11 @@ export const RAID_LABELS: Record<string, string> = {
   wtp: "The Wartorn Palace",
 };
 
-// Vite injects import.meta.env; in Node test bundles import.meta is absent.
-const BASE: string =
-  typeof import.meta !== "undefined" && import.meta.env
-    ? import.meta.env.VITE_API_BASE ?? ""
-    : "";
+// Always call the API on our own origin: in dev the Vite server proxies /api
+// to the backend, in production Netlify proxies it (see netlify.toml). Keeping
+// requests same-origin is what makes the HttpOnly JWT cookie a first-party
+// cookie, so the browser sends it on every request, including after a reload.
+const BASE = "";
 
 let _token: string | null = null;
 

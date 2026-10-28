@@ -91,6 +91,11 @@
   border-bottom-color: currentColor;
 }
 
+.legal-nav a[aria-current="page"] {
+  color: var(--text);
+  border-bottom-color: currentColor;
+}
+
 .legal-doc {
   scroll-margin-top: 1.5rem;
 }

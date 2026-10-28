@@ -504,7 +504,8 @@ function render() {
       <span class="app-footer-brand">Guild Raid Tracker</span>
       <nav class="app-footer-links" aria-label="Legal">
         <a href="/legal#privacy">Privacy Policy</a>
-        <a href="/legal#terms">Terms of Use</a>
+        <a href="/legal#terms">Terms of Service</a>
+        <a href="/legal-changes">Changes</a>
       </nav>
     </footer>
   `;
@@ -612,7 +613,7 @@ function renderLogin() {
         <p class="login-desc">Sign in with Discord to continue</p>
         ${wasDenied ? `<p class="login-error">Your Discord account is not authorized. Ask an admin to add them.</p>` : ""}
         <button class="btn-discord" id="login-btn">Login with Discord</button>
-        <p class="login-legal">By continuing, you agree to the <a href="/legal#terms">Terms of Use</a> and <a href="/legal#privacy">Privacy Policy</a>.</p>
+        <p class="login-legal">By continuing, you agree to the <a href="/legal#terms">Terms of Service</a> and <a href="/legal#privacy">Privacy Policy</a>.</p>
       </div>
     </div>
   `;
