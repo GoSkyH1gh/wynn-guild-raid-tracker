@@ -2,6 +2,16 @@
   command = "npm run build"
   publish = "dist"
 
+# Proxy the API through the site origin so the JWT cookie stays first-party
+# (a cross-site cookie would be dropped by SameSite=Lax, logging users out on
+# every refresh). This also covers the Discord OAuth callback, which must be
+# registered as https://<site>/api/auth/discord/callback.
+[[redirects]]
+  from = "/api/*"
+  to = "https://wynn-guild-raid-tracker.fastapicloud.dev/api/:splat"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/legal"
   to = "/legal.html"

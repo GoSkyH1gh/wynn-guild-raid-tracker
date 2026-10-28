@@ -17,4 +17,4 @@ npm run dev
 
 By default, all users are untrusted and get access by being added through the api with a secret or through the env variables.
 
-If oauth doesn't work, check that the redirect url is properly set (*FRONTEND_URL* and *DISCORD_REDIRECT_URI*)
+If oauth doesn't work, check that the redirect url is properly set (*FRONTEND_URL* and *DISCORD_REDIRECT_URI*). In production *DISCORD_REDIRECT_URI* must point at the frontend origin (e.g. `https://your-site.netlify.app/api/auth/discord/callback`) and be registered in the Discord developer portal, so that the `/api` proxy in `frontend/netlify.toml` keeps the session cookie first-party.
