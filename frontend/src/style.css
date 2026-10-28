@@ -1133,6 +1133,34 @@ tr.voiding td {
   line-height: 1.4;
 }
 
+.login-legal {
+  margin-top: 1.15rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.login-legal a {
+  color: var(--text-dim);
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--text-dim) 55%, transparent);
+  text-underline-offset: 0.16em;
+  border-radius: 2px;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+
+.login-legal a:hover {
+  color: var(--accent-text);
+  text-decoration-color: currentColor;
+}
+
+.login-legal a:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
 .btn-discord {
   font-family: var(--font-display);
   font-weight: 600;

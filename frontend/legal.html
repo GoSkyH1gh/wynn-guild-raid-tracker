@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0e1518" />
+    <meta
+      name="description"
+      content="Privacy Policy and Terms of Use for Guild Raid Tracker, an invite-only Wynncraft guild raid and payout tracker."
+    />
+    <title>Privacy Policy &amp; Terms of Use · Guild Raid Tracker</title>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("theme");
+          if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+        } catch (e) {}
+      })();
+    </script>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⬡</text></svg>"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/legal.css" />
+  </head>
+  <body class="legal-page">
+    <a class="skip-link" href="#content">Skip to content</a>
+
+    <div class="legal-shell">
+      <header class="legal-bar">
+        <a class="legal-back" href="/" aria-label="Back to Guild Raid Tracker">
+          <span aria-hidden="true">←</span> Back
+        </a>
+        <button type="button" class="theme-toggle" aria-label="Switch to light mode">Light</button>
+      </header>
+
+      <main class="legal-main" id="content">
+        <h1 class="legal-page-title">Legal</h1>
+        <nav class="legal-nav" aria-label="Legal sections">
+          <a href="#privacy">Privacy Policy</a>
+          <a href="#terms">Terms of Use</a>
+        </nav>
+
+        <article class="legal-doc" id="privacy" aria-labelledby="privacy-title">
+          <h2 class="legal-doc-title" id="privacy-title">Privacy Policy</h2>
+          <p class="legal-updated">
+            Last updated: <time datetime="2026-10-28">28 October 2026</time>
+          </p>
+
+          <p>
+            This service collects very little personal data: no passwords, no analytics, no ads.
+            This page explains what we do use, why, and how to use your GDPR rights.
+          </p>
+
+          <h3 id="who-is-responsible">Who is responsible</h3>
+          <p>
+            <strong>Guild Raid Tracker</strong> is run by <strong>GoSkyHigh</strong>, who is the
+            controller of your personal data.
+          </p>
+          <div class="legal-meta">
+            <div class="legal-meta-row">
+              <span class="legal-meta-label">Website</span>
+              <a class="legal-meta-value" href="https://guild-raid-tracker.netlify.app"
+                >guild-raid-tracker.netlify.app</a
+              >
+            </div>
+            <div class="legal-meta-row">
+              <span class="legal-meta-label">Contact</span>
+              <a class="legal-meta-value" href="mailto:cx0ypaexy@mozmail.com"
+                >cx0ypaexy@mozmail.com</a
+              >
+            </div>
+          </div>
+
+          <h3 id="what-we-process">What we process</h3>
+
+          <h4>
+            About people who use the app
+            <span class="legal-subheading-note">(from Discord and from what you do in the app)</span>
+          </h4>
+          <div class="legal-table-wrap">
+            <table class="legal-table">
+              <thead>
+                <tr>
+                  <th scope="col">Data</th>
+                  <th scope="col">Why</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    Discord ID, username and avatar link, received when you log in (we ask only
+                    for the <code>identify</code> scope)
+                  </td>
+                  <td>Log you in and show who you are</td>
+                </tr>
+                <tr>
+                  <td>
+                    Payouts you record: the member, raid, day, count and time, plus your Discord ID
+                    and username
+                  </td>
+                  <td>Prevent double payouts and keep a record of who was paid</td>
+                </tr>
+                <tr>
+                  <td>
+                    IP address and browser details, held in our hosting providers' server logs
+                  </td>
+                  <td>Deliver and secure the service</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h4>
+            About guild players
+            <span class="legal-subheading-note"
+              >(from Wynncraft's public API, whether or not they use the app)</span
+            >
+          </h4>
+          <div class="legal-table-wrap">
+            <table class="legal-table">
+              <thead>
+                <tr>
+                  <th scope="col">Data</th>
+                  <th scope="col">Why</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>In-game username, UUID and guild rank, with membership timestamps</td>
+                  <td>Identify guild members and check payout eligibility</td>
+                </tr>
+                <tr>
+                  <td>
+                    Raid completion counts, saved every 30 minutes, and the completions we detect
+                    from changes
+                  </td>
+                  <td>Calculate payouts</td>
+                </tr>
+                <tr>
+                  <td>Payout records: what was paid, for which raid and day</td>
+                  <td>Prevent double payouts and keep a record of who was paid</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p>
+            Player data is public on Wynncraft. We store our own history of it over time, which
+            Wynncraft does not show.
+          </p>
+          <p>
+            We do not require an email address, password, phone number, payment details or precise
+            location to use the service, and we do not request GPS location. Our hosting providers
+            see your IP address, which can reveal your approximate location. If you email us, we
+            process your address and message to reply. We do not store your Discord access token; it
+            is used once during login. We use no analytics, advertising or tracking tools, and we do
+            not sell data or build advertising profiles.
+          </p>
+
+          <h3 id="legal-basis">Why we may use it (legal basis)</h3>
+          <p>
+            We rely on legitimate interests (GDPR Art. 6(1)(f)): running the guild's raid-reward
+            system fairly and securely, with a record of who was paid. We keep the data to what
+            that needs. You can object at any time (see
+            <a href="#your-rights">Your rights</a>).
+          </p>
+
+          <h3 id="never-log-in">If you are a guild member but never log in</h3>
+          <p>
+            We still hold your in-game username, UUID, rank and raid counts, because we get them
+            from Wynncraft and not from you. This policy is your notice for that. You can ask what
+            we hold, or ask to be removed, at any time.
+          </p>
+
+          <h3 id="cookies">Cookies and local storage</h3>
+          <ul>
+            <li>
+              <code>jwt</code> cookie: keeps you logged in for up to 30 days. It is strictly
+              necessary for logging in, so it needs no consent banner, and it is
+              <code>HttpOnly</code> so scripts cannot read it.
+            </li>
+            <li>
+              <code>theme</code> in local storage: remembers light or dark mode. It stays in your
+              browser and is never sent to us.
+            </li>
+          </ul>
+          <p>There are no tracking or advertising cookies.</p>
+
+          <h3 id="third-parties">Who else sees your data</h3>
+          <ul>
+            <li>
+              Discord handles your login. Your browser also loads avatar images from Discord's CDN,
+              so Discord sees your IP address.
+            </li>
+            <li>
+              Wynncraft: we send them the guild ID and our API key and receive roster and raid
+              data. None of your personal data goes to them.
+            </li>
+            <li>
+              Netlify hosts the website, Neon hosts the database and FastAPI Cloud runs the API.
+              They process data on our behalf, and FastAPI Cloud temporarily keeps IP addresses in
+              its server logs.
+            </li>
+            <li>
+              Google Fonts: the site loads its font from Google, so Google sees your IP address and
+              browser details.
+            </li>
+          </ul>
+          <p>Each of these services has its own privacy policy.</p>
+
+          <h3 id="transfers">Transfers outside the EEA</h3>
+          <p>
+            Our database and API run in the US (<code>us-east-1</code>), and Discord, Netlify and
+            Google are US companies. Where your data leaves the EU, we rely on the transfer
+            mechanism each provider offers, such as the EU-US Data Privacy Framework or Standard
+            Contractual Clauses.
+          </p>
+
+          <h3 id="retention">How long we keep data</h3>
+          <p>
+            We do not delete data automatically. We keep it for as long as the guild uses this
+            tracker, so we can keep a record of who was paid and sort out any mix-ups. When you ask,
+            we delete the data we hold about you, except for the payout records described in
+            <a href="#your-rights">Your rights</a>. Deletion is done by hand, so it can take a
+            little time.
+          </p>
+          <p>
+            Your login cookie lasts 30 days. Our hosting providers keep their own server logs and
+            backups for the periods they set.
+          </p>
+
+          <h3 id="your-rights">Your rights</h3>
+          <p>
+            Under the GDPR you can ask us to show you your data, correct it, erase it, restrict its
+            use, give you a copy, or stop using it (object). Email
+            <a href="mailto:cx0ypaexy@mozmail.com">cx0ypaexy@mozmail.com</a> and we will answer
+            within one month. We may ask you to confirm your identity, for example by contacting us
+            from your Discord account.
+          </p>
+          <p>
+            Some limits apply: we may keep basic payout records (what was paid, for which raid and
+            day, and who recorded it) so the ledger stays accurate and mix-ups can be sorted out.
+            Removing your app access does not delete those records. When a payout is voided, its
+            record is deleted immediately and is not kept. If something we hold is wrong, tell us
+            and we will fix or remove it. Errors in data that comes from Wynncraft may also need
+            fixing at Wynncraft.
+          </p>
+          <p>
+            You can also complain to the data protection authority in the country where you live or
+            work. In Romania, that is the National Supervisory Authority for Personal Data
+            Processing (ANSPDCP):
+            <a href="https://www.dataprotection.ro">https://www.dataprotection.ro</a>.
+          </p>
+
+          <h3 id="automated-calculations">Automated calculations</h3>
+          <p>
+            The app suggests payout amounts using fixed rules (rank, daily caps and payout cycles).
+            A person decides and records each payout, and a payout can be voided.
+          </p>
+
+          <h3 id="age">Age</h3>
+          <p>
+            The service is invite-only. You must meet Discord's minimum age in your country (13 or
+            higher).
+          </p>
+
+          <h3 id="security">Security</h3>
+          <p>
+            Access is invite-only, connections use HTTPS, the login cookie is
+            <code>HttpOnly</code>, and we never see or store your Discord password. If a breach
+            affects you, we will tell you and the authority as the law requires.
+          </p>
+
+          <h3 id="privacy-changes">Changes</h3>
+          <p>
+            We will update this page when something changes and change the date at the top.
+          </p>
+        </article>
+
+        <article class="legal-doc" id="terms" aria-labelledby="terms-title">
+          <h2 class="legal-doc-title" id="terms-title">Terms of Use</h2>
+          <p class="legal-updated">
+            Last updated: <time datetime="2026-10-28">28 October 2026</time>
+          </p>
+
+          <p>
+            By using Guild Raid Tracker you agree to these short terms, which cover who can use
+            Guild Raid Tracker, how payouts work and what we cannot promise.
+          </p>
+
+          <h3 id="who-can-use-it">Who can use it</h3>
+          <p>
+            The service is invite-only. Admins add and remove users, and you log in with Discord.
+            You must meet Discord's minimum age in your country (13 or higher), and you are
+            responsible for keeping your Discord account secure.
+          </p>
+
+          <h3 id="roles">Roles</h3>
+          <ul>
+            <li>
+              <strong>Members</strong> can view tracker, reward, payout and status data, refresh the
+              data, record payouts, and void payouts they recorded themselves.
+            </li>
+            <li>
+              <strong>Admins</strong> can also manage users, change daily caps and payout cycles,
+              and void any payout.
+            </li>
+          </ul>
+
+          <h3 id="acceptable-use">Acceptable use</h3>
+          <p>
+            Do not scrape the service, try to access it without permission, interfere with it, or
+            record payouts that did not happen.
+          </p>
+
+          <h3 id="how-payouts-work">How payouts work</h3>
+          <ul>
+            <li>
+              Only certain guild ranks are eligible (currently Recruit, Recruiter and Captain).
+              Other ranks are tracked but not paid.
+            </li>
+            <li>
+              Each eligible raid completion earns one rune, up to a daily cap per raid type. Oldest
+              days are paid first.
+            </li>
+            <li>
+              Payouts can only be recorded for a payout cycle that has ended and whose payout
+              window is still open (currently 7 days).
+            </li>
+            <li>
+              Admins can change caps and cycle settings, and a change applies to all dates at once.
+            </li>
+            <li>
+              Eligibility is worked out from current ranks and current caps. A rank or cap change
+              can therefore change what the app shows as owed for past days. Payouts already
+              recorded do not change.
+            </li>
+            <li>
+              To claim your runes, contact a guild officer (Duke or above) before the payout window
+              closes.
+            </li>
+            <li>Voiding a payout permanently deletes its record; no history of the void is kept.</li>
+          </ul>
+
+          <h3 id="data-accuracy">Data accuracy</h3>
+          <p>
+            Raid data comes from the Wynncraft API and is refreshed every 30 minutes. If a player
+            restricts API access, their raid data may be missing. A completion's time is when the
+            app noticed it, not necessarily when the raid happened. We do not guarantee the data
+            is complete or correct. If you think something is wrong, contact
+            <a href="mailto:cx0ypaexy@mozmail.com">cx0ypaexy@mozmail.com</a>.
+          </p>
+
+          <h3 id="no-cash-value">Runes have no cash value</h3>
+          <p>
+            Payouts are in-game runes only. Nothing in this service has real-world monetary value,
+            and nothing can be refunded or exchanged for money.
+          </p>
+
+          <h3 id="third-parties-terms">Third parties and trademarks</h3>
+          <p>
+            This is an unofficial tool. It is not affiliated with or endorsed by Wynncraft or
+            Discord. Their names belong to their owners, and your use of their services is covered
+            by their own terms.
+          </p>
+
+          <h3 id="no-guarantees">No guarantees</h3>
+          <p>
+            The service is provided as is. We do not promise it will always be available or
+            error-free, and we may change or stop it at any time. To the extent the law allows, we
+            are not liable for losses from using it. Nothing here limits rights you have under
+            mandatory law.
+          </p>
+
+          <h3 id="suspension">Suspension</h3>
+          <p>
+            We may suspend or remove anyone's access at any time, for example for misuse or after
+            leaving the guild. We handle your data as described in the
+            <a href="#privacy">Privacy Policy</a>.
+          </p>
+
+          <h3 id="changes-and-contact">Changes and contact</h3>
+          <p>
+            We may update these terms by changing this page and the date at the top. Continuing to
+            use the service after that means you accept the update. Contact:
+            <a href="mailto:cx0ypaexy@mozmail.com">cx0ypaexy@mozmail.com</a>.
+          </p>
+        </article>
+      </main>
+    </div>
+
+    <script type="module" src="/src/legal.ts"></script>
+  </body>
+</html>
