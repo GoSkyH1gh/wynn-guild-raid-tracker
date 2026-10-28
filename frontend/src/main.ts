@@ -499,6 +499,14 @@ function render() {
     </main>
 
     <div id="status-bar" class="status-bar"></div>
+
+    <footer class="app-footer">
+      <span class="app-footer-brand">Guild Raid Tracker</span>
+      <nav class="app-footer-links" aria-label="Legal">
+        <a href="/legal#privacy">Privacy Policy</a>
+        <a href="/legal#terms">Terms of Use</a>
+      </nav>
+    </footer>
   `;
 
   document.getElementById("logout-btn")?.addEventListener("click", async () => {
