@@ -506,6 +506,47 @@ body {
   color: var(--text-dim);
 }
 
+.app-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  margin-top: 0.9rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.app-footer-brand {
+  font-family: var(--font-display);
+  font-weight: 500;
+}
+
+.app-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+}
+
+.app-footer-links a {
+  color: var(--text-dim);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--text-dim) 45%, transparent);
+  text-underline-offset: 0.16em;
+  border-radius: 2px;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+
+.app-footer-links a:hover {
+  color: var(--accent-text);
+  text-decoration-color: currentColor;
+}
+
+.app-footer-links a:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
 .status-info {
   font-style: italic;
 }
@@ -1131,6 +1172,34 @@ tr.voiding td {
   font-size: 0.8rem;
   margin-bottom: 1rem;
   line-height: 1.4;
+}
+
+.login-legal {
+  margin-top: 1.15rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.login-legal a {
+  color: var(--text-dim);
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--text-dim) 55%, transparent);
+  text-underline-offset: 0.16em;
+  border-radius: 2px;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+
+.login-legal a:hover {
+  color: var(--accent-text);
+  text-decoration-color: currentColor;
+}
+
+.login-legal a:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
 }
 
 .btn-discord {
